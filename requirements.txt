@@ -1,0 +1,6 @@
+future==0.18.3
+gabornet==0.2.0
+numpy==1.21.6
+Pillow==9.5.0
+torch==1.6.0
+torchvision==0.7.0
