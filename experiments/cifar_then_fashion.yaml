@@ -1,0 +1,31 @@
+---
+name: cifar_then_fashion
+description: Trains on CIFAR-10 and finetunes on Fashion-MNIST to compare Gabor-constrained and unconstrained.
+
+save_dir: out/cifar_then_fashion
+seed: 1234
+
+base_model:
+  parameters:
+    dummy: true
+
+initial_dataset: cifar10
+finetune_dataset: fashion_mnist
+dataloader_params:
+  batch_size: 32
+
+schedules:
+
+  gabor:
+    initial_train:
+      gabor_constrained: true
+    finetune:
+      gabor_constrained: true
+      freeze_first_layer: true
+
+  cnn:
+    initial_train:
+      gabor_constrained: false
+    finetune:
+      gabor_constrained: false
+      freeze_first_layer: true
