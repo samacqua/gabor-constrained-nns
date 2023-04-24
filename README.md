@@ -3,11 +3,11 @@
 ## Basic Usage
 
 Using python >= 3.10:
-- `python -m venv venv` to create virtual environment
-- `source venv/bin/activate` to activate virtual environment
-- `pip install -r requirements.txt` to install packages
-- `python experiment.py [PATH_TO_EXPERIMENT]` to run an experiment
-- `python analysis.py [PATH_TO_EXPERIMENT]` to analyze the results of an experiment
+    - `python -m venv venv` to create virtual environment
+    - `source venv/bin/activate` to activate virtual environment
+    - `pip install -r requirements.txt` to install packages
+    - `python experiment.py [PATH_TO_EXPERIMENT]` to run an experiment
+    - `python analysis.py [PATH_TO_EXPERIMENT]` to analyze the results of an experiment
 
 
 ## Experiment configuration format.
