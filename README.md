@@ -15,20 +15,20 @@ Using python >= 3.10:
 Each experiment is specified via a YAML file.
 
 The YAML file has general experiment details:
-    - `name`: The name of the experiment.
-    - `description`: The description of the experiment.
-    - `save_dir`: The save directory of the experiment.
-    - `seed`: The random seed of the experiment.
-    - `base_model`
-        - `parameters`: The parameters for the base neural network (currently unused).
+- `name`: The name of the experiment.
+- `description`: The description of the experiment.
+- `save_dir`: The save directory of the experiment.
+- `seed`: The random seed of the experiment.
+- `base_model`
+    - `parameters`: The parameters for the base neural network (currently unused).
 
 The YAML also specifies *schedules*. A schedule specifies the architecture and training details for the 2-stage training 
 process: the original training, and the finetuning stage.
-    - `initial_train`
-        - `gabor_constrained`: Whether or not the first layer should be constrained to be a Gabor function.
-    - `finetune`
-        - `gabor_constrained`: Same as in `initial_train`.
-        - `freeze_first_layer`: Boolean to freeze the first layer during training.
+- `initial_train`
+    - `gabor_constrained`: Whether or not the first layer should be constrained to be a Gabor function.
+- `finetune`
+    - `gabor_constrained`: Same as in `initial_train`.
+    - `freeze_first_layer`: Boolean to freeze the first layer during training.
 
 ## TODO
 
