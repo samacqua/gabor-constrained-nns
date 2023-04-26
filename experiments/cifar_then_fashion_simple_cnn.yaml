@@ -1,13 +1,13 @@
 ---
-name: cifar_then_fashion
-description: Trains on CIFAR-10 and finetunes on Fashion-MNIST to compare Gabor-constrained and unconstrained.
+name: cifar_then_fashion_simplecnn
+description: Trains on Fashion-MNIST and finetunes on CIFAR-10 to compare Gabor-constrained and unconstrained.
 
-save_dir: out/cifar_then_fashion
+save_dir: out/cifar_then_fashion_simplecnn
 seed: 1234
 
 base_model:
-  name: CNNLinear
-  kernel_size: 16
+  name: CNNSimple
+  kernel_size: 8
 
 n_repeats: 1
 initial_dataset: cifar10
