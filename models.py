@@ -21,12 +21,12 @@ class GaborConv2d(_ConvNd):
         super(GaborConv2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
                                           _pair(0), groups, bias, padding_mode)
         self.freq = nn.Parameter(
-            (3.14 / 2) * 1.41 ** (-torch.randint(0, 5, (out_channels, in_channels))).type(torch.Tensor))
-        self.theta = nn.Parameter((3.14 / 8) * torch.randint(0, 8, (out_channels, in_channels)).type(torch.Tensor))
-        self.psi = nn.Parameter(3.14 * torch.rand(out_channels, in_channels))
-        self.sigma = nn.Parameter(3.14 / self.freq)
-        self.x0 = torch.ceil(torch.Tensor([self.kernel_size[0] / 2]))[0]
-        self.y0 = torch.ceil(torch.Tensor([self.kernel_size[1] / 2]))[0]
+            (3.14 / 2) * 1.41 ** (-torch.randint(0, 5, (out_channels, in_channels))).type(torch.Tensor)).to(device)
+        self.theta = nn.Parameter((3.14 / 8) * torch.randint(0, 8, (out_channels, in_channels)).type(torch.Tensor)).to(device)
+        self.psi = nn.Parameter(3.14 * torch.rand(out_channels, in_channels)).to(device)
+        self.sigma = nn.Parameter(3.14 / self.freq).to(device)
+        self.x0 = torch.ceil(torch.Tensor([self.kernel_size[0] / 2]))[0].to(device)
+        self.y0 = torch.ceil(torch.Tensor([self.kernel_size[1] / 2]))[0].to(device)
         self.device = device
 
     def forward(self, input_image):
@@ -114,11 +114,11 @@ class GaborBase(nn.Module):
 class CNN(GaborBase):
     """A simple CNN that can have a gabor-constrained first layer."""
         
-    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10):
+    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu'):
         super().__init__()
         n_classes = 10
         conv1_type = GaborConv2d if is_gabornet else nn.Conv2d
-        self.conv1 = conv1_type(n_channels, N_OUT, kernel_size=(kernel_size, kernel_size), stride=1)
+        self.conv1 = conv1_type(n_channels, N_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
         self.c1 = nn.Conv2d(N_OUT, N_OUT*2, kernel_size=(3, 3), stride=2)
         self.c2 = nn.Conv2d(N_OUT*2, N_OUT*4, kernel_size=(3, 3), stride=2)
         self.fc1 = nn.LazyLinear(128)
@@ -144,11 +144,11 @@ class CNN(GaborBase):
 class CNNSmall(GaborBase):
     """An even smaller CNN that can have a gabor-constrained first layer."""
         
-    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10):
+    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu'):
         super().__init__()
         n_classes = 10
         conv1_type = GaborConv2d if is_gabornet else nn.Conv2d
-        self.conv1 = conv1_type(n_channels, N_OUT, kernel_size=(kernel_size, kernel_size), stride=1)
+        self.conv1 = conv1_type(n_channels, N_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
         self.c1 = nn.Conv2d(N_OUT, N_OUT*2, kernel_size=(3, 3), stride=2)
         self.fc1 = nn.LazyLinear(64)
         self.fc3 = nn.Linear(64, n_classes)
@@ -172,11 +172,11 @@ class CNNSmall(GaborBase):
 class CNNLinear(GaborBase):
     """A linear CNN that can have a gabor-constrained first layer."""
 
-    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10):
+    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu'):
         super().__init__()
         n_classes = 10
         conv1_type = GaborConv2d if is_gabornet else nn.Conv2d
-        self.conv1 = conv1_type(n_channels, N_OUT, kernel_size=(kernel_size, kernel_size), stride=1)
+        self.conv1 = conv1_type(n_channels, N_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
         self.fc1 = nn.LazyLinear(n_classes)
 
         self.is_gabornet = is_gabornet

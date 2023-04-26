@@ -37,7 +37,7 @@ def run_experiment(config: dict):
         initial_params = training_schedule['initial_train']
 
         # Load the initial model and dataloader.
-        model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=config['n_channels'])
+        model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=config['n_channels'], device=device)
         trainloader_a = torch.utils.data.DataLoader(dataset_a_train, **config['dataloader_params'])
         log_dir = os.path.join(out_dir, "logs", schedule_name + "_a")
         os.makedirs(log_dir, exist_ok=True)

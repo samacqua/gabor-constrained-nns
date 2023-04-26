@@ -23,6 +23,7 @@ def train(model: torch.nn.Module, train_loader: torch.utils.data.DataLoader, opt
         assert model_suffix is not None
 
     model.train()
+    model.to(device)
     writer = SummaryWriter(log_dir=log_dir)
 
     for epoch in range(epochs):
