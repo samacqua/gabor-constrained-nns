@@ -1,6 +1,7 @@
 """Loads the experiment configuration file."""
 
 import torch
+import numpy as np
 import yaml
 import os
 import sys
@@ -16,6 +17,10 @@ def parse_config(config_path: str):
 
     with open(config_path, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
+
+    # Set the random seed.
+    torch.manual_seed(config['seed'])
+    np.random.seed(config['seed'])
 
     # Load the base model.
     config['base_model'] = load_model(config['base_model'])

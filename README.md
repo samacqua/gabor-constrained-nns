@@ -7,20 +7,13 @@ Using python >= 3.10:
 - `source venv/bin/activate` to activate virtual environment
 - `pip install -r requirements.txt` to install packages
 - `python experiment.py [PATH_TO_EXPERIMENT]` to run an experiment
-- `python analysis.py [PATH_TO_EXPERIMENT]` to analyze the results of an experiment
+- `python analysis.py [PATH_TO_EXPERIMENT] --all` to analyze the results of an experiment
 
 
 ## Experiment configuration format.
 
-Each experiment is specified via a YAML file.
-
-The YAML file has general experiment details:
-- `name`: The name of the experiment.
-- `description`: The description of the experiment.
-- `save_dir`: The save directory of the experiment.
-- `seed`: The random seed of the experiment.
-- `base_model`
-    - `parameters`: The parameters for the base neural network (currently unused).
+Each experiment is specified via a YAML file. The parameters should largely be self-explanatory. Look at YAML files in 
+the `experiments/` folder for examples.
 
 The YAML also specifies *schedules*. A schedule specifies the architecture and training details for the 2-stage training 
 process: the original training, and the finetuning stage.
@@ -33,15 +26,7 @@ process: the original training, and the finetuning stage.
 ## TODO
 
 Infrastructure
-- Allow for changing network architecture via YAML (base_model/parameters)
-- Test changing from gabor to CNN and vice versa (`change_constraint`)
 - Allow for multiple runs of same experiment
-- Use random seed
-
-Analysis
-- `visualize_features`: visualize features to create a figure for the paper
-- `test_generalization_hypothesis`: determines which steps (if any) of finetuning process are statistically different and plots convergence
-- `test_plasticity_hypothesis`: determines if Gabor-constrained nets are better at retaining original performance and plots
 
 Experiments
 - testing hypothesis that Gabor-constrained will finetune faster
