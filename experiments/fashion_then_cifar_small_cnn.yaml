@@ -6,7 +6,7 @@ save_dir: out/fashion_then_cifar_simple_cnn
 seed: 1234
 
 base_model:
-  name: CNNSimple
+  name: CNNSmall
   kernel_size: 8
 
 n_repeats: 1
