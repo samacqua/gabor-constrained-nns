@@ -31,8 +31,7 @@ def run_experiment(config: dict):
         initial_params = training_schedule['initial_train']
 
         # Load the initial model and dataloader.
-        model = deepcopy(base_model)
-        model.change_constraint(gabor_constrained=initial_params['gabor_constrained'])
+        model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=config['n_channels'])
         trainloader_a = torch.utils.data.DataLoader(dataset_a_train, **config['dataloader_params'])
 
         # Train the model on the first dataset.
@@ -43,7 +42,8 @@ def run_experiment(config: dict):
 
         # Prep the model for finetuning.
         finetune_params = training_schedule['finetune']
-        model.change_constraint(gabor_constrained=finetune_params['gabor_constrained'])
+        if not finetune_params['gabor_constrained'] and model.is_gabornet:
+            model.unconstrain()
         model.conv1.weight.requires_grad = finetune_params['freeze_first_layer']
         trainloader_b = torch.utils.data.DataLoader(dataset_b_train, **config['dataloader_params'])
 

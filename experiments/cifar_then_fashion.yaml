@@ -11,6 +11,8 @@ base_model:
 
 initial_dataset: cifar10
 finetune_dataset: fashion_mnist
+n_channels: 1
+img_size: 32
 dataloader_params:
   batch_size: 32
 
