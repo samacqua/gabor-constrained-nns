@@ -30,10 +30,40 @@ def count_parameters(model, trainable_only=True):
     return sum(n_by_layer), n_by_layer
 
 
+class DogCatNNSanity(nn.Module):
+    """From https://github.com/iKintosh/GaborNet/blob/master/sanity_check/run_sanity_check.py because paper-architecture not working."""
+
+    def __init__(self, is_gabornet: bool = False):
+        super(DogCatNNSanity, self).__init__()
+        if is_gabornet:
+            self.g1 = GaborConv2d(3, 32, kernel_size=(15, 15), stride=1)
+        else:
+            self.g1 = nn.Conv2d(3, 32, kernel_size=(5, 5), stride=1)
+
+        self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=2)
+        self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=2)
+        self.fc1 = nn.Linear(128 * 7 * 7, 128)
+        self.fc3 = nn.Linear(128, 2)
+
+    def forward(self, x):
+        x = F.max_pool2d(F.leaky_relu(self.g1(x)), kernel_size=2)
+        x = nn.Dropout2d()(x)
+        x = F.max_pool2d(F.leaky_relu(self.c1(x)), kernel_size=2)
+        x = F.max_pool2d(F.leaky_relu(self.c2(x)), kernel_size=2)
+        x = nn.Dropout2d()(x)
+        x = x.view(-1, 128 * 7 * 7)
+        x = F.leaky_relu(self.fc1(x))
+        x = nn.Dropout()(x)
+        x = self.fc3(x)
+        return x
+
+
 class DogCatNet(nn.Module):
+    """Based on figure in original paper."""
+
     def __init__(self, is_gabornet: bool = False):
         super(DogCatNet, self).__init__()
-        
+
         if is_gabornet:
             self.g1 = GaborConv2d(3, 32, kernel_size=(15, 15), stride=1)
         else:
@@ -89,10 +119,12 @@ class DogCatNet(nn.Module):
 def main():
     """check function"""
 
+    net_arch = DogCatNNSanity   # DogCatNet
+
     # Hyperparameters from paper.
     BATCH_SIZE = 64
     OPT = optim.AdamW
-    N_EPOCHS = 100
+    N_EPOCHS = 10
     LR = 0.001
     BETAS = (0.9, 0.999)
 
@@ -122,104 +154,104 @@ def main():
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    gabornet = DogCatNet(is_gabornet=True).to(device)
+    gabornet = net_arch(is_gabornet=True).to(device)
     print(count_parameters(gabornet))
-    cnn = DogCatNet(is_gabornet=False).to(device)
+    cnn = net_arch(is_gabornet=False).to(device)
     print(count_parameters(cnn))
 
     criterion = nn.CrossEntropyLoss()
-    gabornet_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
-    cnn_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
+    gabornet_optimizer = OPT(gabornet.parameters())
+    cnn_optimizer = OPT(cnn.parameters())
 
-    one_layer_gnet_acc_train = []
-    one_layer_gnet_acc_test = []
     time_per_image_train = []
-    time_per_image_test = []
 
     for epoch in range(N_EPOCHS):
 
         print(f"===\nEpoch {epoch + 1}/{N_EPOCHS}\n===")
 
-        gab_loss = [0.0]
-        cnn_loss = [0.0]
+        gab_loss = []
+        cnn_loss = []
 
-        gabornet_correct = [0]
-        cnn_correct = [0]
+        gabornet_correct = []
+        cnn_correct = []
+        n_total = []
         
         gabornet.train()
         cnn.train()
 
         start = time.perf_counter()
-        for data in tqdm(train):
+        for i, data in (enumerate(train)):
+            print(i, len(train))
             # get the inputs
             inputs, labels = data["image"], data["target"]
 
-            for model, optimizer, score, running_loss in (
-                (gabornet, gabornet_optimizer, gabornet_correct, gab_loss),
-                (cnn, cnn_optimizer, cnn_correct, cnn_loss),):
+            # zero the parameter gradients
+            gabornet_optimizer.zero_grad()
 
-                # zero the parameter gradients
-                optimizer.zero_grad()
+            # forward + backward + optimize
+            outputs = gabornet(inputs.to(device))
+            loss = criterion(outputs, labels.to(device))
+            loss.backward()
+            gabornet_optimizer.step()
 
-                # forward + backward + optimize
-                outputs = model(inputs.to(device))
-                loss = criterion(outputs, labels.to(device))
-                loss.backward()
-                optimizer.step()
+            # calculate accuracy
+            pred = outputs.max(1, keepdim=True)[1].to("cpu")
+            gabornet_correct.append(pred.eq(labels.view_as(pred)).sum().item())
+            n_total.append(len(labels))
 
-                # calculate accuracy
-                pred = outputs.max(1, keepdim=True)[1].to("cpu")
-                score[0] += pred.eq(labels.view_as(pred)).sum().item()
+            # print statistics
+            gab_loss.append(loss.item())
 
-                # print statistics
-                running_loss[0] += loss.item()
+            print('gab loss:', gab_loss[-1])
+            print('gab correct:', gabornet_correct[-1])
+
+            # zero the parameter gradients
+            cnn_optimizer.zero_grad()
+
+            # forward + backward + optimize
+            outputs = cnn(inputs.to(device))
+            loss = criterion(outputs, labels.to(device))
+            loss.backward()
+            cnn_optimizer.step()
+
+            # calculate accuracy
+            pred = outputs.max(1, keepdim=True)[1].to("cpu")
+            cnn_correct.append(pred.eq(labels.view_as(pred)).sum().item())
+
+            # print statistics
+            cnn_loss.append(loss.item())
+
+            print('cnn loss:', cnn_loss[-1])
+            print('cnn correct:', cnn_correct[-1])
+
+            # Save results every 5 batches.
+            if i % 5 == 0:
+                result_dict = {
+                    'gabornet_loss': gab_loss,
+                    'gabornet_correct': gabornet_correct,
+                    'cnn_loss': cnn_loss,
+                    'cnn_correct': cnn_correct,
+                    'n_total': n_total,
+                }
+
+                with open("metrics.json", "w+") as outfile:
+                    json.dump(result_dict, outfile)
 
         finish = time.perf_counter()
         time_per_image_train.append((finish - start) / len(train_set))
-        print(
-            "gabornet [%d] train_acc: %.3f train_loss: %.3f"
-            % (epoch + 1, gabornet_correct[0] / len(train_set), gab_loss[0] / len(train_set))
-        )
-        print(
-            "cnn [%d] train_acc: %.3f train_loss: %.3f"
-            % (epoch + 1, cnn_correct[0] / len(train_set), cnn_loss[0] / len(train_set))
-        )
-        # one_layer_gnet_acc_train.append(gabornet_correct[0] / len(train_set))
-
-        # gab_loss = 0.0
-        # gabornet_correct = 0
-        # start = time.perf_counter()
-        # with torch.no_grad():
-        #     gabornet.eval()
-        #     for data in test:
-        #         # get the inputs
-        #         inputs, labels = data["image"], data["target"]
-
-        #         # forward + backward + optimize
-        #         outputs = gabornet(inputs.to(device))
-        #         loss = criterion(outputs, labels.to(device))
-
-        #         pred = outputs.max(1, keepdim=True)[1].to("cpu")
-        #         gabornet_correct += pred.eq(labels.view_as(pred)).sum().item()
-        #         gab_loss += loss.item()
-        # finish = time.perf_counter()
-        # time_per_image_test.append((finish - start) / len(test_set))
-        # print(
-        #     "[%d] test_acc: %.3f test_loss: %.3f"
-        #     % (epoch + 1, gabornet_correct / len(test_set), gab_loss / len(test_set))
-        # )
-        # one_layer_gnet_acc_test.append(gabornet_correct / len(test_set))
 
     print("Finished Training")
 
-    # result_dict = {
-    #     "train_acc": one_layer_gnet_acc_train[-1],
-    #     "test_acc": one_layer_gnet_acc_test[-1],
-    #     "time_per_image_train": sum(time_per_image_train) / len(time_per_image_train),
-    #     "time_per_image_test": sum(time_per_image_test) / len(time_per_image_test),
-    # }
-    # with open("metrics.json", "w+") as outfile:
-    #     json.dump(result_dict, outfile)
+    result_dict = {
+        'gabornet_loss': gab_loss,
+        'gabornet_correct': gabornet_correct,
+        'cnn_loss': cnn_loss,
+        'cnn_correct': cnn_correct,
+        'n_total': n_total,
+    }
+
+    with open("metrics.json", "w+") as outfile:
+        json.dump(result_dict, outfile)
 
 
 if __name__ == "__main__":

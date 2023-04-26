@@ -22,3 +22,25 @@ class DogsCatsDataset(Dataset):
         sample = {"image": image, "target": target}
 
         return sample
+
+if __name__ == "__main__":
+    # Load the dataset.
+    dataset = DogsCatsDataset(root_dir=os.path.join("../data/dogs-vs-cats", "train"))
+
+    # Sample 25 images from the dataset.
+    import numpy as np
+    imgs, labels = [], []
+    for i in range(25):
+        sample = dataset[np.random.randint(len(dataset))]
+        imgs.append(sample["image"])
+        labels.append(sample["target"])
+
+    # Plot the images.
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(10, 10))
+    for i in range(25):
+        ax = fig.add_subplot(5, 5, i + 1)
+        ax.imshow(imgs[i])
+        ax.set_title(labels[i])
+        ax.axis("off")
+    plt.show()
