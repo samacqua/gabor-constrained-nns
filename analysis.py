@@ -1,4 +1,7 @@
-"""Analysis of the results of the experiments + code to generate figures for final paper."""
+"""Analysis of the results of the experiments + code to generate figures for final paper.
+
+You must point to an experiment that has already been run and has a "cnn" schedule and a "gabor" schedule.
+"""
 
 import argparse
 import os
@@ -59,7 +62,7 @@ def test_generalization_hypothesis(gabor_constrained_models: dict[int, list[torc
     plt.show()
 
 
-def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, test_loader_a, device):
+def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, test_loader_a, test_loader_b, device):
     """Tests the hypothesis: Gabor-constrained neural networks will retain original performance better.
 
     Expects that the models are finetuned to the same accuracy or loss.
@@ -68,6 +71,7 @@ def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, t
         gabor_constrained_models: A dictionary of list of Gabor model checkpoints, indexed by epoch.
         unconstrained_models: A dictionary of list of CNN model checkpoints, indexed by epoch.
         test_loader_a: The dataloader for the test set of dataset A.
+        test_loader_b: The dataloader for the test set of dataset B.
         device: The device to run the models on.
     """
 
@@ -83,25 +87,30 @@ def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, t
 
         # Get the accuracy of each model.
         for gabor_model, unconstrained_model in zip(gabor_constrained_models[epoch], unconstrained_models[epoch]):
-            gabor_acc = test_accuracy(test_loader_a, gabor_model, device)
-            unconstrained_acc = test_accuracy(test_loader_a, unconstrained_model, device)
+            gabor_acc_a = test_accuracy(test_loader_a, gabor_model, device)
+            unconstrained_acc_a = test_accuracy(test_loader_a, unconstrained_model, device)
 
-            gabor_accuracies.setdefault(epoch, []).append(gabor_acc)
-            unconstrained_accuracies.setdefault(epoch, []).append(unconstrained_acc)
+            gabor_acc_b = test_accuracy(test_loader_b, gabor_model, device)
+            unconstrained_acc_b = test_accuracy(test_loader_b, unconstrained_model, device)
+
+            print(epoch, gabor_acc_a, unconstrained_acc_a, gabor_acc_b, unconstrained_acc_b)
+
+            gabor_accuracies.setdefault(gabor_acc_b, []).append(gabor_acc_a)
+            unconstrained_accuracies.setdefault(unconstrained_acc_b, []).append(unconstrained_acc_a)
 
         # TODO: Check if the difference is statistically significant.
         pass
 
     # Calculate the mean accuracy of each model on dataset A at each stage of convergence of training on B.
-    gabor_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in gabor_accuracies.items()}
-    unconstrained_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in unconstrained_accuracies.items()}
+    gabor_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in gabor_accuracies.items()}
+    unconstrained_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in unconstrained_accuracies.items()}
 
     # Plot the accuracy of each model at each stage of convergence.
     fig, ax = plt.subplots()
-    ax.plot(gabor_mean_accuracies.keys(), gabor_mean_accuracies.values(), label="Gabor")
-    ax.plot(unconstrained_mean_accuracies.keys(), unconstrained_mean_accuracies.values(), label="Unconstrained")
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Accuracy")
+    ax.plot(gabor_mean_accuracies.keys(), gabor_mean_accuracies.values(), '-o', label="Gabor")
+    ax.plot(unconstrained_mean_accuracies.keys(), unconstrained_mean_accuracies.values(), '-o', label="Unconstrained")
+    ax.set_xlabel("Accuracy on Dataset B")
+    ax.set_ylabel("Accuracy on Dataset A")
     ax.set_title("Accuracy of Gabor and Unconstrained Models at Each Stage of Convergence")
     ax.legend()
     plt.show()
@@ -151,11 +160,17 @@ def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Modu
 def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[torch.nn.Module, torch.nn.Module]]:
     """Loads the final models."""
 
+    # TODO: Load across different runs.
+
     model_save_dir = os.path.join(config['save_dir'], "models")
     base_model = config['base_model']
 
     models = {}
     for model_sequence in os.listdir(model_save_dir):
+
+        # Skip if not simple gabor or cnn.
+        if model_sequence not in ['gabor', 'cnn']:
+            continue
 
         sequence_path = os.path.join(model_save_dir, model_sequence)
 
@@ -211,6 +226,7 @@ def main():
 
     # Parse the configuration file + run the experiment.
     config = parse_config(args.config)
+    config['save_dir'] = os.path.join(config['save_dir'], 'repeat_1')   # TODO: handle multiple runs.
 
     # Load the models.
     models = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
@@ -262,7 +278,7 @@ def main():
         gabor_finetune_model_checkpoints = models['gabor'][3]
         cnn_finetune_model_checkpoints = models['cnn'][3]
 
-        test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, testloader_a, device)
+        test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, testloader_a, testloader_b, device)
 
 
 if __name__ == '__main__':
