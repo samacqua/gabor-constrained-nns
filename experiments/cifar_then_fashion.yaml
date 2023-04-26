@@ -6,13 +6,12 @@ save_dir: out/cifar_then_fashion
 seed: 1234
 
 base_model:
-  parameters:
-    dummy: true
+  name: CNNSimple
 
 initial_dataset: cifar10
 finetune_dataset: fashion_mnist
 n_channels: 1
-img_size: 32
+img_size: 64
 dataloader_params:
   batch_size: 32
 

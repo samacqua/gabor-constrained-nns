@@ -9,6 +9,9 @@ import torch
 from train import train
 from parse_config import parse_config
 
+import warnings
+warnings.filterwarnings("ignore")
+
 
 def run_experiment(config: dict):
     """Runs an experiment."""
@@ -33,10 +36,12 @@ def run_experiment(config: dict):
         # Load the initial model and dataloader.
         model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=config['n_channels'])
         trainloader_a = torch.utils.data.DataLoader(dataset_a_train, **config['dataloader_params'])
+        log_dir = os.path.join(out_dir, "logs", schedule_name + "_a")
+        os.makedirs(log_dir, exist_ok=True)
 
         # Train the model on the first dataset.
         opt = torch.optim.Adam(model.parameters(), **initial_params.get('optimizer_params', {}))
-        train(model, trainloader_a, criterion=criterion, device=device, optimizer=opt)
+        train(model, trainloader_a, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir)
         model_a_save_path = os.path.join(model_save_dir, 'model_a.pt')
         torch.save(model.state_dict(), model_a_save_path)
 
@@ -44,12 +49,21 @@ def run_experiment(config: dict):
         finetune_params = training_schedule['finetune']
         if not finetune_params['gabor_constrained'] and model.is_gabornet:
             model.unconstrain()
-        model.conv1.weight.requires_grad = finetune_params['freeze_first_layer']
+        model.conv1.weight.requires_grad = not finetune_params['freeze_first_layer']
         trainloader_b = torch.utils.data.DataLoader(dataset_b_train, **config['dataloader_params'])
+        log_dir = os.path.join(out_dir, "logs", schedule_name + "_b")
+        os.makedirs(log_dir, exist_ok=True)
 
         # Train the model on the second dataset.
         opt = torch.optim.Adam(model.parameters(), **finetune_params.get('optimizer_params', {}))
-        train(model, trainloader_b, criterion=criterion, device=device, optimizer=opt)
+        pre_train_weights = deepcopy(model.get_conv_weights())
+        train(model, trainloader_b, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir)
+
+        # Check that the first layer weights are actually frozen.
+        post_train_weights = deepcopy(model.get_conv_weights())
+        if finetune_params['freeze_first_layer']:
+            assert torch.allclose(pre_train_weights, post_train_weights, atol=1e-6)
+
         model_b_save_path = os.path.join(model_save_dir, 'model_b.pt')
         torch.save(model.state_dict(), model_b_save_path)
 

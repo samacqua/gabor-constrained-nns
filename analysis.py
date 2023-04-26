@@ -10,6 +10,8 @@ from torchvision import utils
 
 from parse_config import parse_config
 
+import warnings
+warnings.filterwarnings("ignore")
 
 def test_generalization_hypothesis(gabor_constrained_models, unconstrained_models):
     """Tests the hypothesis: Gabor-constrained neural networks will finetune better (converge faster + higher acc)."""
@@ -32,7 +34,9 @@ def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models):
 
     raise NotImplementedError
 
-def visTensor(tensor, ch=0, allkernels=False, nrow=8, padding=1): 
+
+def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1): 
+    """Visualizes a tensor."""
     n,c,w,h = tensor.shape
 
     if allkernels: 
@@ -52,8 +56,7 @@ def visualize_features(model: torch.nn.Module, device: torch.device):
 
     # Get the weights of the first layer.
     weights = model.conv1.weight.data.cpu()
-    visTensor(weights, ch=0, allkernels=False)
-
+    visualize_tensor(weights, ch=0, allkernels=False)
 
 
 def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Module, device: torch.device):
@@ -114,25 +117,25 @@ def main():
     models = load_models(config)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # # Test the accuracy of each model.
-    # testloader_a = torch.utils.data.DataLoader(config['initial_dataset'][1], **config['dataloader_params'])
-    # testloader_b = torch.utils.data.DataLoader(config['finetune_dataset'][1], **config['dataloader_params'])
+    # Test the accuracy of each model.
+    testloader_a = torch.utils.data.DataLoader(config['initial_dataset'][1], **config['dataloader_params'])
+    testloader_b = torch.utils.data.DataLoader(config['finetune_dataset'][1], **config['dataloader_params'])
 
-    # accuracies = {}
-    # for model_sequence, (model_a, model_b) in models.items():
-    #     accuracies[model_sequence] = (test_accuracy(testloader_a, model_a, device), 
-    #                                   test_accuracy(testloader_b, model_b, device),
-    #                                   test_accuracy(testloader_a, model_b, device))
+    accuracies = {}
+    for model_sequence, (model_a, model_b) in models.items():
+        accuracies[model_sequence] = (test_accuracy(testloader_a, model_a, device), 
+                                      test_accuracy(testloader_b, model_b, device),
+                                      test_accuracy(testloader_a, model_b, device))
         
-    # # Print the results.
-    # print("Model Sequence\tInitial Dataset\tFinetune Dataset\tInitial Dataset (Finetuned Model)")
-    # for model_sequence, (acc_a, acc_b, acc_ba) in accuracies.items():
-    #     print(f"{model_sequence}\t{acc_a}\t{acc_b}\t{acc_ba}")
+    # Print the results.
+    print("Model Sequence\tInitial Dataset\tFinetune Dataset\tInitial Dataset (Finetuned Model)")
+    for model_sequence, (acc_a, acc_b, acc_ba) in accuracies.items():
+        print(f"{model_sequence}\t{acc_a}\t{acc_b}\t{acc_ba}")
 
     # Visualize the features of each model.
     for model_sequence, (model_a, model_b) in models.items():
         visualize_features(model_a, device)
-        visualize_features(model_b, device)
+        # visualize_features(model_b, device)
 
 
 if __name__ == '__main__':

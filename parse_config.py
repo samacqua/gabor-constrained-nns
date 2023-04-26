@@ -3,11 +3,12 @@
 import torch
 import yaml
 import os
+import sys
 
 import torchvision
 import torchvision.transforms as transforms
 
-from models import CNN
+from models import CNN, CNNSimple
 
 
 def parse_config(config_path: str):
@@ -76,7 +77,4 @@ def load_model(model_config: dict) -> CNN:
     """Loads the base model."""
 
     # Load the model.
-    model = CNN
-
-    return model
-
+    return getattr(sys.modules[__name__], model_config['name'])
