@@ -19,6 +19,7 @@ def run_experiment(config: dict):
     out_dir = config['save_dir']
     device = "cuda" if torch.cuda.is_available() else "cpu"
     criterion = torch.nn.CrossEntropyLoss()
+    save_every = config['save_every']
 
     # Load the base model and dataset.
     base_model = config['base_model']
@@ -41,9 +42,8 @@ def run_experiment(config: dict):
 
         # Train the model on the first dataset.
         opt = torch.optim.Adam(model.parameters(), **initial_params.get('optimizer_params', {}))
-        train(model, trainloader_a, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir)
-        model_a_save_path = os.path.join(model_save_dir, 'model_a.pt')
-        torch.save(model.state_dict(), model_a_save_path)
+        train(model, trainloader_a, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir, 
+              save_every=save_every, model_save_dir=model_save_dir, model_suffix='a')
 
         # Prep the model for finetuning.
         finetune_params = training_schedule['finetune']
@@ -57,15 +57,13 @@ def run_experiment(config: dict):
         # Train the model on the second dataset.
         opt = torch.optim.Adam(model.parameters(), **finetune_params.get('optimizer_params', {}))
         pre_train_weights = deepcopy(model.get_conv_weights())
-        train(model, trainloader_b, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir)
+        train(model, trainloader_b, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir, 
+              save_every=save_every, model_save_dir=model_save_dir, model_suffix='b')
 
         # Check that the first layer weights are actually frozen.
         post_train_weights = deepcopy(model.get_conv_weights())
         if finetune_params['freeze_first_layer']:
             assert torch.allclose(pre_train_weights, post_train_weights, atol=1e-6)
-
-        model_b_save_path = os.path.join(model_save_dir, 'model_b.pt')
-        torch.save(model.state_dict(), model_b_save_path)
 
 
 def main():

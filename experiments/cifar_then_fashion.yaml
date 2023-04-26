@@ -7,11 +7,13 @@ seed: 1234
 
 base_model:
   name: CNNSimple
+  kernel_size: 5
 
 initial_dataset: cifar10
 finetune_dataset: fashion_mnist
 n_channels: 1
-img_size: 64
+img_size: 16
+save_every: 200
 dataloader_params:
   batch_size: 32
 

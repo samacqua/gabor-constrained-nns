@@ -77,4 +77,5 @@ def load_model(model_config: dict) -> CNN:
     """Loads the base model."""
 
     # Load the model.
-    return getattr(sys.modules[__name__], model_config['name'])
+    return lambda *args, **kwargs: getattr(sys.modules[__name__], model_config['name'])(
+        *args, kernel_size=model_config['kernel_size'], **kwargs)
