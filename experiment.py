@@ -13,65 +13,73 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
+def run_experiment_leg(base_model, config):
+    """Runs part of the experiment."""
+
+
 def run_experiment(config: dict):
     """Runs an experiment."""
 
-    out_dir = config['save_dir']
     device = "cuda" if torch.cuda.is_available() else "cpu"
     criterion = torch.nn.CrossEntropyLoss()
-    save_every = config['save_every']
+
+    # Load training parameters.
+    out_dir = config['save_dir']
+    training_cfg = config['training']
+    save_every = training_cfg['save_every']
+    n_epochs = training_cfg['epochs']
+
+    # Load the dataset.
+    dataset_cfg = config['datasets']
+    dataset_a_train, dataset_a_test = dataset_cfg['initial']
+    dataset_b_train, dataset_b_test = dataset_cfg['finetune']
+    n_channels = dataset_cfg['params']['n_channels']
 
     # Load the base model and dataset.
     base_model = config['base_model']
-    dataset_a_train, dataset_a_test = config['initial_dataset']
-    dataset_b_train, dataset_b_test = config['finetune_dataset']
 
     for schedule_name, training_schedule in config['schedules'].items():
 
-        print()
-        print(schedule_name)
+        print("\n" + "=== " + schedule_name + " ===")
 
         model_save_dir = os.path.join(out_dir, "models", schedule_name)
         os.makedirs(model_save_dir, exist_ok=True)
 
         initial_params = training_schedule['initial_train']
-
-        # Load the initial model and dataloader.
-        model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=config['n_channels'], device=device)
-        trainloader_a = torch.utils.data.DataLoader(dataset_a_train, **config['dataloader_params'])
-        log_dir = os.path.join(out_dir, "logs", schedule_name + "_a")
-        os.makedirs(log_dir, exist_ok=True)
-
-        # Train the model on the first dataset.
-        opt = torch.optim.Adam(model.parameters(), **initial_params.get('optimizer_params', {}))
-        pre_train_a_weights = deepcopy(model.get_conv_weights().detach().clone())
-        train(model, trainloader_a, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir, 
-              save_every=save_every, model_save_dir=model_save_dir, model_suffix='a', epochs=config['epochs'])
+        model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=n_channels, device=device)
         
-        # Check that the weights changed.
-        pre_train_b_weights = deepcopy(model.get_conv_weights().detach().clone())
-        assert not torch.allclose(pre_train_a_weights, pre_train_b_weights, atol=1e-6), "Weights didn't change!"
+        # Train the model on the first dataset, then on the second dataset.
+        for i, (exp_params, dataset) in enumerate((
+            (training_schedule['initial_train'], dataset_a_train),
+            (training_schedule['finetune'], dataset_b_train))):
 
-        # Prep the model for finetuning.
-        finetune_params = training_schedule['finetune']
-        if not finetune_params['gabor_constrained'] and model.is_gabornet:
-            model.unconstrain()
-        if finetune_params['freeze_first_layer']:
-            model.freeze_first_layer()
-        trainloader_b = torch.utils.data.DataLoader(dataset_b_train, **config['dataloader_params'])
-        log_dir = os.path.join(out_dir, "logs", schedule_name + "_b")
-        os.makedirs(log_dir, exist_ok=True)
+            # Set the model parameters.
+            if not exp_params['gabor_constrained'] and model.is_gabornet:
+                model.unconstrain()
+            if exp_params['freeze_first_layer']:
+                model.freeze_first_layer()
 
-        # Train the model on the second dataset.
-        opt = torch.optim.Adam(model.parameters(), **finetune_params.get('optimizer_params', {}))
-        train(model, trainloader_b, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir, 
-              save_every=save_every, model_save_dir=model_save_dir, model_suffix='b', epochs=config['epochs'])
+            # Load the dataset.
+            trainloader = torch.utils.data.DataLoader(dataset, **training_cfg['dataloader_params'])
+            dataset_name = "a" if i == 0 else "b"
+            log_dir = os.path.join(out_dir, "logs", schedule_name + "_" + dataset_name)
+            os.makedirs(log_dir, exist_ok=True)
+
+            # Train the model on the first dataset.
+            opt = torch.optim.Adam(model.parameters(), **exp_params['optimizer_params'])
+            pre_train_weights = deepcopy(model.get_conv_weights().detach().clone())
+            if not exp_params['skip']:
+                print("Training on dataset " + dataset_name.upper())
+                train(model, trainloader, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir, 
+                    save_every=save_every, model_save_dir=model_save_dir, model_suffix=dataset_name, 
+                    epochs=n_epochs)
         
-        # Check that the first layer weights are actually frozen.
-        post_train_weights = deepcopy(model.get_conv_weights().detach().clone())
-        weights_changed = torch.allclose(pre_train_b_weights, post_train_weights, atol=1e-6)
-        assert weights_changed == finetune_params['freeze_first_layer'], \
-            f"Expected 1st layer to change? {not finetune_params['freeze_first_layer']}. Changed? {not weights_changed}"
+            # Check that the weights changed.
+            post_train_weights = deepcopy(model.get_conv_weights().detach().clone())
+            weights_changed = not torch.allclose(pre_train_weights, post_train_weights, atol=1e-6)
+            weights_should_change = (not exp_params['skip'] and not exp_params['freeze_first_layer'])
+            assert weights_changed == weights_should_change, \
+                f"Weights should{'' if weights_should_change else ' not'} have changed. Changed? {weights_changed}"
 
 
 def main():

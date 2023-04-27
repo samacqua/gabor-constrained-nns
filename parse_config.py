@@ -26,17 +26,34 @@ def parse_config(config_path: str):
     config['base_model'] = load_model(config['base_model'])
 
     # Load the datasets.
-    config['initial_dataset'] = load_dataset(config['initial_dataset'], config['n_channels'], config['img_size'])
-    config['finetune_dataset'] = load_dataset(config['finetune_dataset'], config['n_channels'], config['img_size'])
+    config['datasets']['initial'], config['datasets']['finetune'] = load_datasets(config['datasets'])
+    # config['initial_dataset'] = load_dataset(config['initial_dataset'], config['n_channels'], config['img_size'])
+    # config['finetune_dataset'] = load_dataset(config['finetune_dataset'], config['n_channels'], config['img_size'])
 
-    # Make the save directory.
+    # Make the save directories.
     os.makedirs(config['save_dir'], exist_ok=True)
+
+    default_schedule_params = {
+        "gabor_constrained": False, "skip": False, "freeze_first_layer": False, "optimizer_params": {},
+    }
+
+    # Set the default sequence parameters.
+    for schedule_name, training_schedule in config['schedules'].items():
+        stages = {"initial_train", "finetune"}
+        assert set(training_schedule.keys()) == stages, \
+            "Training schedule must have 'initial_train' and 'finetune' keys."
+
+        for stage in stages:
+            training_schedule[stage] = {**default_schedule_params, **training_schedule[stage]}
 
     return config
 
 
-def load_dataset(dataset_name: str, n_channels: int = 1, img_size: int = 32) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+def load_datasets(dataset_cfg: dict) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """Loads a train + test dataset."""
+
+    img_size = dataset_cfg['params']['img_size']
+    n_channels = dataset_cfg['params']['n_channels']
 
     # Make the transforms based on the number of channels.
     # CIFAR-10 is 3-channel, Fashion-MNIST is 1-channel, so 1 has to change.
@@ -65,16 +82,21 @@ def load_dataset(dataset_name: str, n_channels: int = 1, img_size: int = 32) -> 
         },
     }
 
-    if dataset_name not in datasets:
-        raise ValueError(f"Dataset {dataset_name} not supported. Supported datasets: {list(datasets.keys())}")
-    
-    dataset = datasets[dataset_name]
-    trainset = dataset['loader'](root='./data', train=True,
+    # Load each dataset.
+    loaded_datasets = []
+    for dataset_name in (dataset_cfg['initial'], dataset_cfg['finetune']):
+        if dataset_name not in datasets:
+            raise ValueError(f"Dataset {dataset_name} not supported. Supported datasets: {list(datasets.keys())}")
+        
+        dataset = datasets[dataset_name]
+        trainset = dataset['loader'](root='./data', train=True,
+                                                download=True, transform=dataset['transform'])
+        testset = dataset['loader'](root='./data', train=False,
                                             download=True, transform=dataset['transform'])
-    testset = dataset['loader'](root='./data', train=False,
-                                        download=True, transform=dataset['transform'])
+        
+        loaded_datasets.append((trainset, testset))
     
-    return trainset, testset
+    return loaded_datasets
     
 
 

@@ -9,6 +9,7 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+import pickle
 
 import torch
 from torchvision import utils
@@ -20,7 +21,9 @@ warnings.filterwarnings("ignore")
 
 
 def test_generalization_hypothesis(gabor_constrained_models: dict[int, list[torch.nn.Module]], 
-                                   unconstrained_models: dict[int, list[torch.nn.Module]], test_loader_b, device):
+                                   unconstrained_models: dict[int, list[torch.nn.Module]], 
+                                   baseline_models: dict[int, list[torch.nn.Module]], test_loader_b, device, 
+                                   save_dir: str):
     """Tests the hypothesis: Gabor-constrained neural networks will finetune better (converge faster + higher acc).
     
     Args:
@@ -31,38 +34,65 @@ def test_generalization_hypothesis(gabor_constrained_models: dict[int, list[torc
     """
     epochs = sorted(list(gabor_constrained_models.keys()))
 
-    # Check if statistically higher accuracy at each stage of convergence.
-    gabor_accuracies = {}
-    unconstrained_accuracies = {}
-    for epoch in tqdm(epochs):
+    # Get the accuracy of each model at each stage of convergence.
+    try:
+        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "rb") as f:
+            gabor_accuracies = pickle.load(f)
+        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "rb") as f:
+            unconstrained_accuracies = pickle.load(f)
+        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "rb") as f:
+            baseline_accuracies = pickle.load(f)
+    except FileNotFoundError:
+        gabor_accuracies = {}
+        unconstrained_accuracies = {}
+        baseline_accuracies = {}
+        for epoch in tqdm(epochs):
 
-        # Get the accuracy of each model.
-        for gabor_model, unconstrained_model in zip(gabor_constrained_models[epoch], unconstrained_models[epoch]):
-            gabor_acc = test_accuracy(test_loader_b, gabor_model, device)
-            unconstrained_acc = test_accuracy(test_loader_b, unconstrained_model, device)
+            # Get the accuracy of each model.
+            for gabor_model, unconstrained_model, baseline_model in zip(
+                gabor_constrained_models[epoch], unconstrained_models[epoch], baseline_models[epoch]):
 
-            gabor_accuracies.setdefault(epoch, []).append(gabor_acc)
-            unconstrained_accuracies.setdefault(epoch, []).append(unconstrained_acc)
+                gabor_acc = test_accuracy(test_loader_b, gabor_model, device)
+                unconstrained_acc = test_accuracy(test_loader_b, unconstrained_model, device)
+                baseline_acc = test_accuracy(test_loader_b, baseline_model, device)
 
-        # TODO: Check if the difference is statistically significant.
-        pass
+                gabor_accuracies.setdefault(epoch, []).append(gabor_acc)
+                unconstrained_accuracies.setdefault(epoch, []).append(unconstrained_acc)
+                baseline_accuracies.setdefault(epoch, []).append(baseline_acc)
+
+            # TODO: Check if the difference is statistically significant.
+            pass
+
+        # Save the results.
+        os.makedirs(save_dir, exist_ok=True)
+        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "wb") as f:
+            pickle.dump(gabor_accuracies, f)
+        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "wb") as f:
+            pickle.dump(unconstrained_accuracies, f)
+        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "wb") as f:
+            pickle.dump(baseline_accuracies, f)
 
     # Calculate the mean accuracy of each model at each stage of convergence.
     gabor_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in gabor_accuracies.items()}
     unconstrained_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in unconstrained_accuracies.items()}
+    baseline_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in baseline_accuracies.items()}
 
     # Plot the accuracy of each model at each stage of convergence.
     fig, ax = plt.subplots()
     ax.plot(gabor_mean_accuracies.keys(), gabor_mean_accuracies.values(), label="Gabor")
     ax.plot(unconstrained_mean_accuracies.keys(), unconstrained_mean_accuracies.values(), label="Unconstrained")
+    ax.plot(baseline_mean_accuracies.keys(), baseline_mean_accuracies.values(), label="Baseline")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Accuracy")
     ax.set_title("Accuracy of Gabor and Unconstrained Models at Each Stage of Convergence")
     ax.legend()
+
+    plt.savefig(os.path.join(save_dir, "accuracy_vs_epoch.png"))
     plt.show()
 
 
-def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, test_loader_a, test_loader_b, device):
+def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, baseline_models, test_loader_a, 
+                               test_loader_b, device, save_dir):
     """Tests the hypothesis: Gabor-constrained neural networks will retain original performance better.
 
     Expects that the models are finetuned to the same accuracy or loss.
@@ -81,42 +111,90 @@ def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, t
 
     # Check if the accuracy on dataset A, after finetuning to accuracy X on dataset B, is higher for the constrained
     # model than the unconstrained model.
-    gabor_accuracies = {}
-    unconstrained_accuracies = {}
-    for epoch in tqdm(epochs):
+    try:
+        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "rb") as f:
+            gabor_accuracies = pickle.load(f)
+        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "rb") as f:
+            unconstrained_accuracies = pickle.load(f)
+        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "rb") as f:
+            baseline_accuracies = pickle.load(f)
+    except FileNotFoundError:
+        gabor_accuracies = {}
+        unconstrained_accuracies = {}
+        baseline_accuracies = {}
+        for epoch in tqdm(epochs):
 
-        # Get the accuracy of each model.
-        for gabor_model, unconstrained_model in zip(gabor_constrained_models[epoch], unconstrained_models[epoch]):
-            gabor_acc_a = test_accuracy(test_loader_a, gabor_model, device)
-            unconstrained_acc_a = test_accuracy(test_loader_a, unconstrained_model, device)
+            # Get the accuracy of each model.
+            for gabor_model, unconstrained_model, baseline_model in zip(
+                gabor_constrained_models[epoch], unconstrained_models[epoch], baseline_models[epoch]):
 
-            gabor_acc_b = test_accuracy(test_loader_b, gabor_model, device)
-            unconstrained_acc_b = test_accuracy(test_loader_b, unconstrained_model, device)
+                gabor_acc_a = test_accuracy(test_loader_a, gabor_model, device)
+                unconstrained_acc_a = test_accuracy(test_loader_a, unconstrained_model, device)
+                baseline_acc_a = test_accuracy(test_loader_a, baseline_model, device)
 
-            print(epoch, gabor_acc_a, unconstrained_acc_a, gabor_acc_b, unconstrained_acc_b)
+                gabor_acc_b = test_accuracy(test_loader_b, gabor_model, device)
+                unconstrained_acc_b = test_accuracy(test_loader_b, unconstrained_model, device)
+                baseline_acc_b = test_accuracy(test_loader_b, baseline_model, device)
 
-            gabor_accuracies.setdefault(gabor_acc_b, []).append(gabor_acc_a)
-            unconstrained_accuracies.setdefault(unconstrained_acc_b, []).append(unconstrained_acc_a)
+                gabor_accuracies.setdefault(gabor_acc_b, []).append(gabor_acc_a)
+                unconstrained_accuracies.setdefault(unconstrained_acc_b, []).append(unconstrained_acc_a)
+                baseline_accuracies.setdefault(baseline_acc_b, []).append(baseline_acc_a)
 
-        # TODO: Check if the difference is statistically significant.
-        pass
+            # TODO: Check if the difference is statistically significant.
+            pass
+
+        # Save the results.
+        os.makedirs(save_dir, exist_ok=True)
+        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "wb") as f:
+            pickle.dump(gabor_accuracies, f)
+        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "wb") as f:
+            pickle.dump(unconstrained_accuracies, f)
+        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "wb") as f:
+            pickle.dump(baseline_accuracies, f)
 
     # Calculate the mean accuracy of each model on dataset A at each stage of convergence of training on B.
     gabor_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in gabor_accuracies.items()}
     unconstrained_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in unconstrained_accuracies.items()}
+    baseline_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in baseline_accuracies.items()}
 
     # Plot the accuracy of each model at each stage of convergence.
     fig, ax = plt.subplots()
     ax.plot(gabor_mean_accuracies.keys(), gabor_mean_accuracies.values(), '-o', label="Gabor")
     ax.plot(unconstrained_mean_accuracies.keys(), unconstrained_mean_accuracies.values(), '-o', label="Unconstrained")
+    ax.plot(baseline_mean_accuracies.keys(), baseline_mean_accuracies.values(), '-o', label="Baseline")
     ax.set_xlabel("Accuracy on Dataset B")
     ax.set_ylabel("Accuracy on Dataset A")
     ax.set_title("Accuracy of Gabor and Unconstrained Models at Each Stage of Convergence")
     ax.legend()
+
+    plt.savefig(os.path.join(save_dir, "accuracy_vs_accuracy.png"))
     plt.show()
 
 
-def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1): 
+def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, test_loader, device, save_dir):
+    """Tests the hypothesis: Gabor-constrained neural networks will be more robust to adversarial attacks.
+
+    Expects that the models are finetuned to the same accuracy or loss.
+    
+    Args:
+        gabor_constrained_model: The Gabor model.
+        unconstrained_model: The CNN model.
+        test_loader: The dataloader for the test set.
+        device: The device to run the models on.
+    """
+
+    # For each model, find the instance of each class that it gets correct with the highest confidence.
+
+    # For each high-confidence instance, find the adversarial example that makes it classified as the wrong class.
+
+    # Check the distance between the adversary and original image.
+
+    # Check each model's performance on the other's adversary (and the original unperturbed image).
+
+    raise NotImplementedError
+
+
+def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1, save_dir: str = None): 
     """Visualizes a tensor."""
     n,c,w,h = tensor.shape
 
@@ -129,15 +207,19 @@ def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False
     grid = utils.make_grid(tensor, nrow=nrow, normalize=True, padding=padding)
     plt.figure( figsize=(nrow,rows) )
     plt.imshow(grid.numpy().transpose((1, 2, 0)))
+
+    if save_dir is not None:
+        plt.savefig(os.path.join(save_dir, "features.png"))
+
     plt.show()
 
 
-def visualize_features(model: torch.nn.Module, device: torch.device):
+def visualize_features(model: torch.nn.Module, save_dir: str):
     """Visualizes the features of a model."""
 
     # Get the weights of the first layer.
     weights = model.conv1.weight.data.cpu()
-    visualize_tensor(weights, ch=0, allkernels=False)
+    visualize_tensor(weights, ch=0, allkernels=False, save_dir=save_dir)
 
 
 def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Module, device: torch.device):
@@ -157,6 +239,19 @@ def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Modu
     return correct / total
 
 
+def load_model(base_model: torch.nn.Module, is_gabornet: bool, n_channels: int, save_path: str):
+    """Loads a model."""
+
+    model = base_model(is_gabornet=is_gabornet, n_channels=n_channels)
+    try:
+        model.load_state_dict(torch.load(save_path))
+    except FileNotFoundError:
+        print("Could not load model from path: {}".format(save_path))
+        model = None
+
+    return model
+
+
 def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[torch.nn.Module, torch.nn.Module]]:
     """Loads the final models."""
 
@@ -164,12 +259,13 @@ def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[tor
 
     model_save_dir = os.path.join(config['save_dir'], "models")
     base_model = config['base_model']
+    n_channels = config['datasets']['params']['n_channels']
 
     models = {}
     for model_sequence in os.listdir(model_save_dir):
 
         # Skip if not simple gabor or cnn.
-        if model_sequence not in ['gabor', 'cnn']:
+        if model_sequence not in ['gabor', 'cnn', 'baseline']:
             continue
 
         sequence_path = os.path.join(model_save_dir, model_sequence)
@@ -177,14 +273,12 @@ def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[tor
         # Load the model after training on the first dataset.
         model_a_path = os.path.join(sequence_path, "model_a.pt")
         init_cfg = config['schedules'][model_sequence]['initial_train']
-        model_a = base_model(is_gabornet=init_cfg['gabor_constrained'], n_channels=config['n_channels'])
-        model_a.load_state_dict(torch.load(model_a_path))
+        model_a = load_model(base_model, init_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_a_path)
 
         # Load the model after training on the second dataset.
         model_b_path = os.path.join(sequence_path, "model_b.pt")
         finetune_cfg = config['schedules'][model_sequence]['finetune']
-        model_b = base_model(finetune_cfg['gabor_constrained'], n_channels=config['n_channels'])
-        model_b.load_state_dict(torch.load(model_b_path))
+        model_b = load_model(base_model, finetune_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_b_path)
 
         # Load models saved during training. Only load if specified to save loading time.
         intermediate_a = {}
@@ -197,8 +291,11 @@ def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[tor
                 if args:    # If there is an epoch number.
                     epoch = int(args[0].split(".")[0])
 
-                    intermediate_model = deepcopy(model_a if a_or_b == "a" else model_b)
-                    intermediate_model.load_state_dict(torch.load(os.path.join(sequence_path, model_fname)))
+                    # Load the model.
+                    intermediate_cfg = init_cfg if a_or_b == "a" else finetune_cfg
+                    intermediate_model = load_model(base_model, intermediate_cfg['gabor_constrained'], 
+                                                    n_channels=n_channels, 
+                                                    save_path=os.path.join(sequence_path, model_fname))
 
                     if a_or_b == "a":
                         intermediate_a[epoch] = [intermediate_model]
@@ -228,6 +325,10 @@ def main():
     config = parse_config(args.config)
     config['save_dir'] = os.path.join(config['save_dir'], 'repeat_1')   # TODO: handle multiple runs.
 
+    # Create the analysis folder.
+    analysis_dir = os.path.join(config['save_dir'], "analysis")
+    os.makedirs(analysis_dir, exist_ok=True)
+
     # Load the models.
     models = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -235,29 +336,37 @@ def main():
     # Load the datasets.
     if args.all or args.generalization or args.plasticity or args.test:
         print("Loading datasets...")
-        testloader_a = torch.utils.data.DataLoader(config['initial_dataset'][1], **config['dataloader_params'])
-        testloader_b = torch.utils.data.DataLoader(config['finetune_dataset'][1], **config['dataloader_params'])
+        testloader_a = torch.utils.data.DataLoader(config['datasets']['initial'][1], batch_size=128, shuffle=False)
+        testloader_b = torch.utils.data.DataLoader(config['datasets']['finetune'][1], batch_size=128, shuffle=False)
 
     # Test the final accuracies of the models.
     if args.all or args.test:
         print("Testing accuracies...")
         accuracies = {}
         for model_sequence, (model_a, model_b, _, _) in models.items():
-            accuracies[model_sequence] = (test_accuracy(testloader_a, model_a, device), 
+            model_a_acc = test_accuracy(testloader_a, model_a, device) if model_a is not None else None
+            accuracies[model_sequence] = (model_a_acc, 
                                         test_accuracy(testloader_b, model_b, device),
                                         test_accuracy(testloader_a, model_b, device))
-            
+
         # Print the results.
-        print("Model Sequence\tInitial Dataset\tFinetune Dataset\tInitial Dataset (Finetuned Model)")
+        max_name_len = max([len(name) for name in accuracies])
+        padded_name = "Name" + ' ' * (max_name_len - 4)
+        print(f"{padded_name}\tA\tB\tA (trained on B)")
         for model_sequence, (acc_a, acc_b, acc_ba) in accuracies.items():
-            print(f"{model_sequence}\t{acc_a}\t{acc_b}\t{acc_ba}")
+            padded_name = model_sequence + ' ' * (max_name_len - len(model_sequence))
+            print(f"{padded_name}\t{acc_a}\t{acc_b}\t{acc_ba}")
+
+        # Save the results.
+        with open(os.path.join(analysis_dir, "test_accuracies.pkl"), "wb") as f:
+            pickle.dump(accuracies, f)
 
     # Visualize the features of each model.
     if args.all or args.visualize:
         print("Visualizing features...")
         for model_sequence, (model_a, model_b, _, _) in models.items():
-            visualize_features(model_a, device)
-            # visualize_features(model_b, device)
+            # visualize_features(model_a, save_dir=analysis_dir)
+            visualize_features(model_b, save_dir=analysis_dir)
 
     # Run the generalization analysis.
     if args.all or args.generalization:
@@ -266,8 +375,11 @@ def main():
         # Load the intermediate models on the finetuned dataset.
         gabor_finetune_model_checkpoints = models['gabor'][3]
         cnn_finetune_model_checkpoints = models['cnn'][3]
+        baseline_model_checkpoints = models['baseline'][3]
 
-        test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, testloader_b, device)
+        test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
+                                       baseline_model_checkpoints, testloader_b, device, 
+                                       save_dir=os.path.join(analysis_dir, 'generalization'))
 
     
     # Run the plasticity analysis.
@@ -277,8 +389,11 @@ def main():
         # Load the intermediate models on the finetuned dataset.
         gabor_finetune_model_checkpoints = models['gabor'][3]
         cnn_finetune_model_checkpoints = models['cnn'][3]
+        baseline_model_checkpoints = models['baseline'][3]
 
-        test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, testloader_a, testloader_b, device)
+        test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
+                                   baseline_model_checkpoints, testloader_a, testloader_b, device,
+                                   save_dir=os.path.join(analysis_dir, 'plasticity'))
 
 
 if __name__ == '__main__':
