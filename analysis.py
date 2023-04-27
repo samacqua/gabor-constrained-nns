@@ -10,9 +10,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import pickle
+import scipy.stats as stats
 
 import torch
 from torchvision import utils
+import torch.nn.functional as F
 
 from parse_config import parse_config
 
@@ -183,15 +185,105 @@ def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, te
         device: The device to run the models on.
     """
 
-    # For each model, find the instance of each class that it gets correct with the highest confidence.
+    # For each model, sample examples that it gets correct.
+    gabor_correct = []
+    unconstrained_correct = []
+    N_exs = 500
+    for model, list_of_correct in zip([gabor_constrained_model, unconstrained_model], [gabor_correct, unconstrained_correct]):
+        for x, y in test_loader:
+            x, y = x.to(device), y.to(device)
+            y_pred = model(x)
+            y_pred = torch.argmax(y_pred, dim=1)
+            for i in range(len(x)):
+                if y_pred[i] == y[i]:
+                    list_of_correct.append((x[i], y[i]))
+                    if len(list_of_correct) == N_exs:
+                        break
+            if len(list_of_correct) == N_exs:
+                break
+
+
+    if len(gabor_correct) < N_exs or len(unconstrained_correct) < N_exs:
+        raise ValueError("Not enough examples were sampled.")
+
+    def fgsm_attack(image, epsilon, data_grad):
+        # Collect the element-wise sign of the data gradient
+        sign_data_grad = data_grad.sign()
+        # Create the perturbed image by adjusting each pixel of the input image
+        perturbed_image = image + epsilon*sign_data_grad
+        # Adding clipping to maintain [0,1] range
+        perturbed_image = torch.clamp(perturbed_image, 0, 1)
+        # Return the perturbed image
+        return perturbed_image
+    
+    def adversarial_attack(model, x, y, device, epsilon=0.1):
+        """Returns the adversarial example that is perturbed by epsilon."""
+
+        x = x.clone().unsqueeze(0)
+        x.requires_grad = True
+
+        # Forward pass the data through the model + backpropogate the error.
+        output = model(x)
+        loss = torch.nn.CrossEntropyLoss()(output, y.unsqueeze(0))
+        model.zero_grad()
+        loss.backward()
+        data_grad = x.grad.data
+
+        # Call FGSM Attack
+        x_adv = fgsm_attack(x, epsilon, data_grad)
+
+        # Re-classify the perturbed image
+        output_adversarial = model(x_adv)
+
+        return x_adv, output, output_adversarial
 
     # For each high-confidence instance, find the adversarial example that makes it classified as the wrong class.
+    gabor_adversaries = []
+    unconstrained_adversaries = []
+    for model, correct_data, adversaries in zip(
+        [gabor_constrained_model, unconstrained_model], 
+        [gabor_correct, unconstrained_correct], 
+        [gabor_adversaries, unconstrained_adversaries]):
 
-    # Check the distance between the adversary and original image.
+        for x, y in tqdm(correct_data):
+            x_adv, og_output, adversarial_output = adversarial_attack(model, x, y, device, epsilon=0.1)
+            
+            # Normalize the outputs.
+            og_output = torch.nn.functional.softmax(og_output, dim=1)[0,y.item()]
+            adversarial_output = torch.nn.functional.softmax(adversarial_output, dim=1)[0,y.item()]
 
-    # Check each model's performance on the other's adversary (and the original unperturbed image).
+            adversaries.append((x, x_adv, y, og_output, adversarial_output))
 
-    raise NotImplementedError
+    # Calculate the difference in confidence between the original and adversarial examples.
+    gabor_distances = []
+    unconstrained_distances = []
+    gabor_img_diffs = []
+    unconstrained_img_diffs = []
+
+    for gabor_adv, unconstrained_adv in zip(gabor_adversaries, unconstrained_adversaries):
+
+        x, x_adv, y, og_output, adversarial_output = gabor_adv
+        gabor_distances.append(torch.abs(og_output - adversarial_output).item())
+        gabor_img_diffs.append(torch.norm(x - x_adv).item())
+
+        x, x_adv, y, og_output, adversarial_output = unconstrained_adv
+        unconstrained_distances.append(torch.abs(og_output - adversarial_output).item())
+        unconstrained_img_diffs.append(torch.norm(x - x_adv).item())
+
+    # Check if statistically significant.
+    # Between the distances.
+    t, p = stats.ttest_ind(gabor_distances, unconstrained_distances)
+    print(f"t: {t}, p: {p}")
+
+    # Between the image differences.
+    t, p = stats.ttest_ind(gabor_img_diffs, unconstrained_img_diffs)
+    print(f"t: {t}, p: {p}")
+
+    # Print the result.
+    print(f"Gabor confidence difference: {np.mean(gabor_distances):.3f} {np.std(gabor_distances):.3f}")
+    print(f"Unconstrained confidence difference: {np.mean(unconstrained_distances):.3f} {np.std(unconstrained_distances):.3f}")
+    print(f"Gabor image difference: {np.mean(gabor_img_diffs):.3f} {np.std(gabor_img_diffs):.3f}")
+    print(f"Unconstrained image difference: {np.mean(unconstrained_img_diffs):.3f} {np.std(unconstrained_img_diffs):.3f}")
 
 
 def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1, save_dir: str = None): 
@@ -318,6 +410,7 @@ def main():
     parser.add_argument("--visualize", action="store_true", help="Visualize the features of the models.")
     parser.add_argument("--generalization", action="store_true", help="Run the generalization analysis.")
     parser.add_argument("--plasticity", action="store_true", help="Run the plasticity analysis.")
+    parser.add_argument("--adversarial", action="store_true", help="Run the adversarial analysis.")
 
     args = parser.parse_args()
 
@@ -334,7 +427,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load the datasets.
-    if args.all or args.generalization or args.plasticity or args.test:
+    if args.all or args.generalization or args.plasticity or args.test or args.adversarial:
         print("Loading datasets...")
         testloader_a = torch.utils.data.DataLoader(config['datasets']['initial'][1], batch_size=128, shuffle=False)
         testloader_b = torch.utils.data.DataLoader(config['datasets']['finetune'][1], batch_size=128, shuffle=False)
@@ -394,6 +487,15 @@ def main():
         test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
                                    baseline_model_checkpoints, testloader_a, testloader_b, device,
                                    save_dir=os.path.join(analysis_dir, 'plasticity'))
+        
+    # Run the adversarial analysis.
+    if args.all or args.adversarial:
+        print("Running adversarial analysis...")
+
+        gabor_finetune_model = models['gabor'][1]
+        cnn_finetune_model = models['cnn'][1]
+        test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
+                                    save_dir=os.path.join(analysis_dir, 'adversarial'))
 
 
 if __name__ == '__main__':
