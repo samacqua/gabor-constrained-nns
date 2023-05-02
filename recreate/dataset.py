@@ -1,3 +1,5 @@
+"""From https://github.com/iKintosh/GaborNet/blob/master/sanity_check/dataset.py."""
+
 import os
 
 from skimage import io
