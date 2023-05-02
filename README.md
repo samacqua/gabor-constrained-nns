@@ -1,4 +1,4 @@
-# Do gabor-filter constrained neural networks generalize better?
+# Do Gabor-filter constrained neural networks generalize better?
 
 ## Basic Usage
 
