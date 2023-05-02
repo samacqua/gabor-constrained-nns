@@ -6,7 +6,7 @@ Based on https://github.com/iKintosh/GaborNet/blob/master/sanity_check/run_sanit
 original paper as possible.
 """
 
-import json
+from typing import Type
 import os
 from tqdm import tqdm
 import argparse
@@ -33,12 +33,12 @@ class DogCatNNSanity(nn.Module):
     tests, so this serves as a good starting point of something the authors have implemented.
     """
 
-    def __init__(self, is_gabornet: bool = False):
+    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True):
         super(DogCatNNSanity, self).__init__()
         if is_gabornet:
-            self.g1 = GaborConv2d(3, 32, kernel_size=(15, 15), stride=1)
+            self.g1 = GaborConv2d(3, 32, kernel_size=kernel_size, stride=1)
         else:
-            self.g1 = nn.Conv2d(3, 32, kernel_size=(5, 5), stride=1)
+            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
 
         self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=2)
         self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=2)
@@ -72,29 +72,34 @@ class DogCatNet(nn.Module):
     It isn't clear why the authors chose to compare a 15x15 Gabor kernel to a 5x5 CNN kernel. It seems like a fairer
     comparison would be to have kernels with either the same number of parameters (2x2 CNN kernel) or the same size 
     (15x15 CNN kernel).
+
+    add_padding is a boolean that specifies whether to add padding before the first connected layer. Used to make sure 
+    parameter counts are equal after the original layer. 
     """
 
-    def __init__(self, is_gabornet: bool = False):
+    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False):
         super(DogCatNet, self).__init__()
 
         if is_gabornet:
-            self.g1 = GaborConv2d(in_channels=3, out_channels=32, kernel_size=(15, 15), stride=1)
+            self.g1 = GaborConv2d(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1)
         else:
-            self.g1 = nn.Conv2d(3, 32, kernel_size=(5, 5), stride=1)
+            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
 
         self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1)
         self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=1)
         self.c3 = nn.Conv2d(128, 128, kernel_size=(3, 3), stride=1)
         self.c4 = nn.Conv2d(128, 128, kernel_size=(3, 3), stride=1)
 
-        if is_gabornet:
-            self.fc1 = nn.Linear(3200, 128)
-        else:
-            self.fc1 = nn.Linear(128 * 6 * 6, 128)
+        self.fc1 = nn.LazyLinear(128)
+        # if is_gabornet:
+        #     self.fc1 = nn.Linear(3200, 128)
+        # else:
+        #     self.fc1 = nn.Linear(128 * 6 * 6, 128)
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, 2)
 
         self.is_gabornet = is_gabornet
+        self.add_padding = add_padding
 
     def forward(self, x):
 
@@ -122,15 +127,11 @@ class DogCatNet(nn.Module):
         # assert x.shape == (N, 128, 13, 13)
 
         # Should be (N, 128, 5, 5) according to paper.
-        x = F.max_pool2d(F.relu(self.c4(x)), kernel_size=2)
+        x = F.max_pool2d(F.relu(self.c4(x)), kernel_size=2, padding=int(self.add_padding))
         x = nn.Dropout2d()(x)
-        # assert x.shape == (N, 128, 5, 5)
+        self._x_size = x.shape
 
-        # Since the shapes don't match between the 5x5 CNN and 15x15 GaborNet, we need to reshape differently.
-        if self.is_gabornet:
-            x = x.view(-1, 3200)
-        else:
-            x = x.view(-1, 128 * 6 * 6)
+        x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
         x = nn.Dropout()(x)
         assert x.shape == (N, 128)
@@ -143,6 +144,43 @@ class DogCatNet(nn.Module):
         assert x.shape == (N, 2)
 
         return x
+
+
+def determine_padding(model_arch: Type[torch.nn.Module], gabor_kernel: tuple[int, int], cnn_kernel: tuple[int, int]
+                      ) -> tuple[bool, bool]:
+    """Determines which model, if either, needs padding to have the same architecture post-filter."""
+
+    if model_arch != DogCatNet:
+        raise ValueError("This function only works for the DogCatNet architecture.")
+
+    # Run a random image of the correct shape through the model to calculate the size before the linear layers.
+    fake_img = torch.randn(1, 3, 256, 256)
+
+    gabor_model = model_arch(is_gabornet=True, kernel_size=gabor_kernel, add_padding=False)
+    cnn_model = model_arch(is_gabornet=False, kernel_size=cnn_kernel, add_padding=False)
+    _ = gabor_model(fake_img)
+    _ = cnn_model(fake_img)
+
+    # Determine if padding is needed.
+    if gabor_model._x_size == cnn_model._x_size:
+        return False, False
+    elif gabor_model._x_size == (1, 128, 6, 6) and cnn_model._x_size == (1, 128, 5, 5):
+        gabor_padding = False
+        cnn_padding = True
+    elif gabor_model._x_size == (1, 128, 5, 5) and cnn_model._x_size == (1, 128, 6, 6):
+        gabor_padding = True
+        cnn_padding = False
+    else:
+        raise ValueError("Simple heuristic to match architectures doesn't work.")
+    
+    # Test that the padding works.
+    gabor_model = model_arch(is_gabornet=True, kernel_size=gabor_kernel, add_padding=gabor_padding)
+    cnn_model = model_arch(is_gabornet=False, kernel_size=cnn_kernel, add_padding=cnn_padding)
+    _ = gabor_model(fake_img)
+    _ = cnn_model(fake_img)
+    assert gabor_model._x_size == cnn_model._x_size
+
+    return gabor_padding, cnn_padding
 
 
 def load_net(fpath: str, model: torch.nn.Module, optimizer: optim.Optimizer = None
@@ -194,6 +232,9 @@ def main():
     parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
     parser.add_argument("--model", type=str, default="DogCatNet")
     parser.add_argument("--resume", action="store_true", help="Resume training from latest checkpoint.")
+    parser.add_argument("--gabor_kernel", type=int, default=15, help="Size of GaborNet kernel.")
+    parser.add_argument("--cnn_kernel", type=int, default=5, help="Size of CNN kernel.")
+    parser.add_argument("--no_padding", action="store_true", help="Don't use padding to even the paramters.")
     args = parser.parse_args()
 
     rand_seed = args.seed if args.seed is not None else np.random.randint(0, 10000)
@@ -241,8 +282,12 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Load the models + optimizers.
-    gabornet = net_arch(is_gabornet=True).to(device)
-    cnn = net_arch(is_gabornet=False).to(device)
+    if net_arch == DogCatNet and not args.no_padding:
+        gabor_padding, cnn_padding = determine_padding(net_arch, args.gabor_kernel, args.cnn_kernel)
+    else:
+        gabor_padding, cnn_padding = False, False
+    gabornet = net_arch(is_gabornet=True, kernel_size=args.gabor_kernel, add_padding=gabor_padding).to(device)
+    cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding).to(device)
     gabornet_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
     cnn_optimizer = OPT(cnn.parameters(), lr=LR, betas=BETAS)
 
