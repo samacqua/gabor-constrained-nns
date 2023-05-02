@@ -6,6 +6,7 @@ import pickle
 import os
 from tqdm import tqdm
 from typing import Type
+import json
 
 import torch
 from torch.utils.data import DataLoader
@@ -169,9 +170,12 @@ def load_models(model_dir: str, base_model: torch.nn.Module = Type[torch.nn.Modu
 
             is_gabornet = "gabor" in fname
             model_dict = gabor_models if is_gabornet else cnn_models
+            checkpoint = torch.load(os.path.join(model_dir, fname))
 
-            model = base_model(is_gabornet=is_gabornet)
-            model, _, model_epoch = load_net(os.path.join(model_dir, fname), model)
+            kernel_size = checkpoint.get("kernel_size", (15, 15) if is_gabornet else (5, 5))
+            add_padding = checkpoint.get("add_padding", False)
+            model = base_model(is_gabornet=is_gabornet, kernel_size=kernel_size, add_padding=add_padding)
+            model, _, model_epoch = load_net(checkpoint, model)
 
             assert epoch == model_epoch
             model_dict[epoch + 1] = model   # Epochs are 0-indexed in files, but we want 1-indexed.
@@ -184,6 +188,7 @@ def main():
     # Parse the arguments.
     parser = argparse.ArgumentParser()
     parser.add_argument("seed", type=int, help="The random seed of the experiment to analyze.")
+    
     parser.add_argument("--use_cache", action="store_true", help="If True, then if accuracies are already calculated, "
                                                                     "they will be loaded from cache.")
     parser.add_argument("--N", type=int, default=1024, help="The number of samples to use from the train / test sets.")
@@ -192,18 +197,23 @@ def main():
     parser.add_argument("--base_model", type=str, default="DogCatNet", help="The base model to use for the CNNs.")
     args = parser.parse_args()
 
-    if args.base_model == "DogCatNet":
+    # Load the training arguments.
+    save_dir = f"recreate/out/seed_{args.seed}/"
+    with open(os.path.join(save_dir, "args.json"), "rb") as f:
+        train_args = json.load(f)
+
+    base_model = train_args['model']
+    if base_model == "DogCatNet":
         base_model = DogCatNet
-    elif args.base_model == "DogCatNNSanity":
+    elif base_model == "DogCatNNSanity":
         base_model = DogCatNNSanity
     else:
-        raise ValueError(f"Invalid base model: {args.base_model}")
+        raise ValueError(f"Invalid base model: {base_model}")
     
     # Load the testset.
     print("Loading dataset...")
-    save_dir = f"recreate/out/seed_{args.seed}/"
     torch.manual_seed(args.seed)
-    train_set, test_set = load_dataset()
+    train_set, test_set = load_dataset(train_args['dataset_dir'], img_size=train_args['img_size'])
 
     # Split the trainset into train and test.
     train_set, test_set1 = torch.utils.data.random_split(

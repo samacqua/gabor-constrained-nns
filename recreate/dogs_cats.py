@@ -11,6 +11,7 @@ import os
 from tqdm import tqdm
 import argparse
 import numpy as np
+import json
 
 import torch
 import torch.nn as nn
@@ -104,7 +105,7 @@ class DogCatNet(nn.Module):
     def forward(self, x):
 
         N = x.shape[0]
-        assert x.shape == (N, 3, 256, 256)
+        # assert x.shape == (N, 3, 256, 256)
 
         # Should be (N, 32, 120, 120) according to paper.
         x1 = F.max_pool2d(F.relu(self.g1(x)), kernel_size=2)
@@ -183,7 +184,7 @@ def determine_padding(model_arch: Type[torch.nn.Module], gabor_kernel: tuple[int
     return gabor_padding, cnn_padding
 
 
-def load_net(fpath: str, model: torch.nn.Module, optimizer: optim.Optimizer = None
+def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = None
              ) -> tuple[nn.Module, optim.Optimizer, int]:
     """Loads a model from a file, with the optimizer and epoch."""
 
@@ -195,7 +196,6 @@ def load_net(fpath: str, model: torch.nn.Module, optimizer: optim.Optimizer = No
         model.g1.x_grid = Parameter(model.g1.x_grid.contiguous())
         model.g1.y_grid = Parameter(model.g1.y_grid.contiguous())
 
-    checkpoint = torch.load(fpath)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     # Load the optimizer.
@@ -205,14 +205,14 @@ def load_net(fpath: str, model: torch.nn.Module, optimizer: optim.Optimizer = No
     return model, optimizer, checkpoint["epoch"]
 
 
-def load_dataset(dataset_dir: str = "data/dogs-vs-cats/"):
+def load_dataset(dataset_dir: str = "data/dogs-vs-cats/", img_size: tuple[int, int] = (256, 256)):
     """Loads the cats v. dogs dataset."""
 
     # Noramlize the data.
     transform = transforms.Compose(
         [
             transforms.ToPILImage(),
-            transforms.Resize((256, 256)),
+            transforms.Resize(img_size),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ]
@@ -229,12 +229,16 @@ def main():
     # Parse arguments.
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=None, help="Random seed.")
-    parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
-    parser.add_argument("--model", type=str, default="DogCatNet")
     parser.add_argument("--resume", action="store_true", help="Resume training from latest checkpoint.")
+
+    parser.add_argument("--model", type=str, default="DogCatNet")
     parser.add_argument("--gabor_kernel", type=int, default=15, help="Size of GaborNet kernel.")
     parser.add_argument("--cnn_kernel", type=int, default=5, help="Size of CNN kernel.")
     parser.add_argument("--no_padding", action="store_true", help="Don't use padding to even the paramters.")
+
+    parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
+    parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
+
     args = parser.parse_args()
 
     rand_seed = args.seed if args.seed is not None else np.random.randint(0, 10000)
@@ -244,6 +248,7 @@ def main():
         should_continue = input(f"Overwriting existing files ({save_dir}). Continue? [y/n] ")
         if should_continue.lower() != "y":
             exit(0)
+    os.makedirs(save_dir, exist_ok=True)
 
     if args.model == "DogCatNet":
         net_arch = DogCatNet
@@ -252,15 +257,19 @@ def main():
     else:
         raise ValueError(f"Invalid model {args.model}.")
 
-    cnn_load_path, gabor_load_path = None, None
+    cnn_checkpoint, gabor_checkpoint = None, None
     if args.resume:
         # Find the latest version of the model. fnames of form: "{model_name}_epoch_{epoch}.pth"
         fnames = [fname for fname in os.listdir(save_dir) if fname.endswith(".pth")]
         cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in fnames if "cnn" in fname])
         gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in fnames if "gabor" in fname])
         assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs do not match."
-        cnn_load_path = os.path.join(save_dir, f"cnn_epoch_{cnn_epoch}.pth")
-        gabor_load_path = os.path.join(save_dir, f"gabornet_epoch_{gabor_epoch}.pth")
+        cnn_checkpoint = torch.load(os.path.join(save_dir, f"cnn_epoch_{cnn_epoch}.pth"))
+        gabor_checkpoint = torch.load(os.path.join(save_dir, f"gabornet_epoch_{gabor_epoch}.pth"))
+
+    # Save the arguments.
+    with open(os.path.join(save_dir, "args.json"), "w") as f:
+        json.dump(vars(args), f)
 
     # Hyperparameters from paper.
     BATCH_SIZE = 64
@@ -271,7 +280,7 @@ def main():
 
     # Load the dataset.
     torch.manual_seed(rand_seed)
-    train_set, test_set = load_dataset(args.dataset_dir)
+    train_set, test_set = load_dataset(args.dataset_dir, (args.img_size, args.img_size))
 
     # Paper says they use 30% of the trainset as the validation set.
     # Just going to do that via code.
@@ -292,11 +301,11 @@ def main():
     cnn_optimizer = OPT(cnn.parameters(), lr=LR, betas=BETAS)
 
     starting_epoch = 0
-    if cnn_load_path and gabor_load_path:
-        gabornet, gabornet_optimizer, last_epoch_gabor = load_net(gabor_load_path, gabornet, gabornet_optimizer)
+    if cnn_checkpoint and gabor_checkpoint:
+        gabornet, gabornet_optimizer, last_epoch_gabor = load_net(gabor_checkpoint, gabornet, gabornet_optimizer)
         starting_epoch = last_epoch_gabor + 1
 
-        cnn, cnn_optimizer, last_epoch_cnn = load_net(cnn_load_path, cnn, cnn_optimizer)
+        cnn, cnn_optimizer, last_epoch_cnn = load_net(cnn_checkpoint, cnn, cnn_optimizer)
         assert starting_epoch == last_epoch_cnn + 1
 
     # Train the models.
@@ -370,6 +379,8 @@ def main():
             'loss': gab_loss,
             'correct': gabornet_correct,
             'n_total': n_total,
+            'kernel_size': args.gabor_kernel,
+            'add_padding': gabor_padding,
         }, os.path.join(save_dir, f"gabornet_epoch_{epoch}.pth"))
 
         # Save the model + optimizer state for cnn.
@@ -380,6 +391,8 @@ def main():
             'loss': cnn_loss,
             'correct': cnn_correct,
             'n_total': n_total,
+            'kernel_size': args.cnn_kernel,
+            'add_padding': cnn_padding,
         }, os.path.join(save_dir, f"cnn_epoch_{epoch}.pth"))
 
     print("Finished Training")
