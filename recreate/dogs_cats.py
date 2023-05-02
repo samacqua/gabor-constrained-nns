@@ -21,7 +21,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from models import GaborConv2d
+from train import train_many
+from gabor_layer import GaborConv2d
 from .dataset import DogsCatsDataset
 
 from torch.utils.tensorboard import SummaryWriter
@@ -309,93 +310,16 @@ def main():
         assert starting_epoch == last_epoch_cnn + 1
 
     # Train the models.
-    criterion = nn.CrossEntropyLoss()
-    writer = SummaryWriter(log_dir=save_dir)
+    models = [gabornet, cnn]
+    optimizers = [gabornet_optimizer, cnn_optimizer]
+    model_names = ["gabornet", "cnn"]
+    model_infos = [
+        {'kernel_size': args.gabor_kernel, 'add_padding': gabor_padding},
+        {'kernel_size': args.cnn_kernel, 'add_padding': cnn_padding}
+    ]
 
-    gabornet.train()
-    cnn.train()
-
-    for epoch in range(starting_epoch, N_EPOCHS):
-
-        print(f"=======\nEpoch {epoch + 1}/{N_EPOCHS}\n=======")
-
-        gab_loss = []
-        cnn_loss = []
-
-        gabornet_correct = []
-        cnn_correct = []
-        n_total = []
-    
-        for i, data in enumerate(tqdm(train)):
-
-            batch_idx = epoch * len(train) + i
-            inputs, labels = data["image"], data["target"]
-
-            # === GABORNET ===
-
-            gabornet_optimizer.zero_grad()
-            outputs = gabornet(inputs.to(device))
-            loss = criterion(outputs, labels.to(device))
-            loss.backward()
-            gabornet_optimizer.step()
-
-            # Calculate stats + log.
-            pred = outputs.max(1, keepdim=True)[1].to("cpu")
-            gabornet_correct.append(pred.eq(labels.view_as(pred)).sum().item())
-            gab_loss.append(loss.item())
-
-            writer.add_scalars("Loss/train", {'gabornet': loss.item()}, batch_idx)
-            writer.add_scalars(
-                "Accuracy/train",
-                {'gabornet': gabornet_correct[-1] / len(labels)},
-                batch_idx,
-            )
-
-            # === CNN ===
-
-            cnn_optimizer.zero_grad()
-            outputs = cnn(inputs.to(device))
-            loss = criterion(outputs, labels.to(device))
-            loss.backward()
-            cnn_optimizer.step()
-
-            # Calculate stats + log.
-            pred = outputs.max(1, keepdim=True)[1].to("cpu")
-            cnn_correct.append(pred.eq(labels.view_as(pred)).sum().item())
-            cnn_loss.append(loss.item())
-
-            writer.add_scalars("Loss/train", {'cnn': loss.item()}, batch_idx)
-            writer.add_scalars(
-                "Accuracy/train",
-                {'cnn': cnn_correct[-1] / len(labels)},
-                batch_idx,
-            )
-
-        # Save the model + optimizer state for gabornet.
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': gabornet.state_dict(),
-            'optimizer_state_dict': gabornet_optimizer.state_dict(),
-            'loss': gab_loss,
-            'correct': gabornet_correct,
-            'n_total': n_total,
-            'kernel_size': args.gabor_kernel,
-            'add_padding': gabor_padding,
-        }, os.path.join(save_dir, f"gabornet_epoch_{epoch}.pth"))
-
-        # Save the model + optimizer state for cnn.
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': cnn.state_dict(),
-            'optimizer_state_dict': cnn_optimizer.state_dict(),
-            'loss': cnn_loss,
-            'correct': cnn_correct,
-            'n_total': n_total,
-            'kernel_size': args.cnn_kernel,
-            'add_padding': cnn_padding,
-        }, os.path.join(save_dir, f"cnn_epoch_{epoch}.pth"))
-
-    print("Finished Training")
+    train_many(models=models, optimizers=optimizers, model_names=model_names, model_infos=model_infos, 
+               dataloader=train, save_dir=save_dir, device=device, starting_epoch=starting_epoch, n_epochs=N_EPOCHS)
 
 
 if __name__ == "__main__":
