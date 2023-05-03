@@ -25,8 +25,6 @@ from train import train_many
 from gabor_layer import GaborConv2d, GaborConv2dBuggy, GaborConv2dStillBuggy
 from .dataset import DogsCatsDataset
 
-from torch.utils.tensorboard import SummaryWriter
-
 
 class DogCatNNSanity(nn.Module):
     """From https://github.com/iKintosh/GaborNet/blob/master/sanity_check/run_sanity_check.py.
@@ -154,7 +152,7 @@ def determine_padding(model_arch: Type[torch.nn.Module], gabor_kernel: tuple[int
     """Determines which model, if either, needs padding to have the same architecture post-filter."""
 
     if model_arch != DogCatNet:
-        raise ValueError("This function only works for the DogCatNet architecture.")
+        raise NotImplementedError("This function only works for the DogCatNet architecture.")
 
     # Run a random image of the correct shape through the model to calculate the size before the linear layers.
     fake_img = torch.randn(1, 3, 256, 256)
@@ -174,7 +172,7 @@ def determine_padding(model_arch: Type[torch.nn.Module], gabor_kernel: tuple[int
         gabor_padding = True
         cnn_padding = False
     else:
-        raise ValueError("Simple heuristic to match architectures doesn't work.")
+        raise NotImplementedError("Simple heuristic to match architectures doesn't work.")
     
     # Test that the padding works.
     gabor_model = model_arch(is_gabornet=True, kernel_size=gabor_kernel, add_padding=gabor_padding)
@@ -232,12 +230,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=None, help="Random seed.")
     parser.add_argument("--resume", action="store_true", help="Resume training from latest checkpoint.")
+    parser.add_argument("--dir_name", type=str, default=None, 
+                        help="Name of directory to save in. Defaults to seed_{random seed}.")
 
-    parser.add_argument("--model", type=str, default="DogCatNet")
+    parser.add_argument("--model", type=str, default="DogCatNet", choices=["DogCatNet", "DogCatNNSanity"])
     parser.add_argument("--gabor_kernel", type=int, default=15, help="Size of GaborNet kernel.")
     parser.add_argument("--cnn_kernel", type=int, default=5, help="Size of CNN kernel.")
     parser.add_argument("--no_padding", action="store_true", help="Don't use padding to even the paramters.")
-    parser.add_argument("--gabor_type", type=str, default="GaborConv2d", help="Type of GaborNet to use.")
+    parser.add_argument("--gabor_type", type=str, default="GaborConv2d", help="Type of GaborNet to use.", 
+                        choices=["GaborConv2d", "GaborConv2dBuggy", "GaborConv2dStillBuggy"])
+    parser.add_argument("--freeze_cnn_first_layer", action="store_true", help="Freeze the first layer of the CNN.")
+
+    parser.add_argument("--cnn_or_gabor", type=str, default=None, help="Which model to train.", choices=["cnn", "gabor"])
 
     parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
     parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
@@ -245,7 +249,7 @@ def main():
     args = parser.parse_args()
 
     rand_seed = args.seed if args.seed is not None else np.random.randint(0, 10000)
-    save_dir = os.path.join("recreate/out/", f"seed_{rand_seed}/")
+    save_dir = os.path.join("recreate/out/", (args.dir_name or f"seed_{rand_seed}/"))
 
     if os.path.exists(save_dir) and not args.resume:    # Make sure we are not overwriting on accident.
         should_continue = input(f"Overwriting existing files ({save_dir}). Continue? [y/n] ")
@@ -253,21 +257,8 @@ def main():
             exit(0)
     os.makedirs(save_dir, exist_ok=True)
 
-    if args.model == "DogCatNet":
-        net_arch = DogCatNet
-    elif args.model == "DogCatNNSanity":
-        net_arch = DogCatNNSanity
-    else:
-        raise ValueError(f"Invalid model {args.model}.")
-    
-    if args.gabor_type == "GaborConv2d":
-        gabor_arch = GaborConv2d
-    elif args.gabor_type == "GaborConv2dBuggy":
-        gabor_arch = GaborConv2dBuggy
-    elif args.gabor_type == "GaborConv2dStillBuggy":
-        gabor_arch = GaborConv2dStillBuggy
-    else:
-        raise ValueError(f"Invalid GaborNet type {args.gabor_type}.")
+    net_arch = globals()[args.model]
+    gabor_arch = globals()[args.gabor_type]
 
     cnn_checkpoint, gabor_checkpoint = None, None
     if args.resume:
@@ -288,7 +279,7 @@ def main():
     # Hyperparameters from paper.
     BATCH_SIZE = 64
     OPT = optim.AdamW
-    N_EPOCHS = 40
+    N_EPOCHS = 25
     LR = 0.001
     BETAS = (0.9, 0.999)
 
@@ -298,6 +289,10 @@ def main():
 
     # Paper says they use 30% of the trainset as the validation set.
     # Just going to do that via code.
+    # N = 128
+    # train_set, _ = torch.utils.data.random_split(
+    #     train_set, [N, len(train_set) - N]
+    # )
     train_set, _ = torch.utils.data.random_split(
         train_set, [int(len(train_set) * 0.7), int(len(train_set) * 0.3)]
     )
@@ -324,6 +319,11 @@ def main():
         cnn, cnn_optimizer, last_epoch_cnn = load_net(cnn_checkpoint, cnn, cnn_optimizer)
         assert starting_epoch == last_epoch_cnn + 1
 
+    # Freeze the CNN layer.
+    if args.freeze_cnn_first_layer:
+        for param in cnn.g1.parameters():
+            param.requires_grad = False
+
     # Train the models.
     models = [gabornet, cnn]
     optimizers = [gabornet_optimizer, cnn_optimizer]
@@ -332,6 +332,15 @@ def main():
         {'kernel_size': args.gabor_kernel, 'add_padding': gabor_padding},
         {'kernel_size': args.cnn_kernel, 'add_padding': cnn_padding}
     ]
+
+    # Only train one model.
+    if args.cnn_or_gabor:
+        index = int(args.cnn_or_gabor == "cnn")
+
+        models = [models[index]]
+        optimizers = [optimizers[index]]
+        model_names = [model_names[index]]
+        model_infos = [model_infos[index]]
 
     train_many(models=models, optimizers=optimizers, model_names=model_names, model_infos=model_infos, 
                dataloader=train, save_dir=save_dir, device=device, starting_epoch=starting_epoch, n_epochs=N_EPOCHS)
