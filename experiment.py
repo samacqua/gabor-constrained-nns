@@ -6,80 +6,138 @@ import os
 
 import torch
 
-from train import train
+from train import train, train_many
 from parse_config import parse_config
 
 import warnings
 warnings.filterwarnings("ignore")
 
 
-def run_experiment_leg(base_model, config):
-    """Runs part of the experiment."""
+def get_checkpoints(save_dir: str, model_names: list[str], models: list[torch.nn.Module], 
+                    optimizers: list[torch.optim.Optimizer]) -> tuple[torch.nn.Module, torch.optim.Optimizer]:
+    """Returns the latest models from a directory."""
+
+    # Load the models.
+    max_epoch = None
+    for model, name, optimizer in zip(models, model_names, optimizers):
+
+        # Get the latest epoch.
+        model_save_dir = os.path.join(save_dir, "models", name)
+        if not os.path.exists(model_save_dir):
+            assert max_epoch is None
+            return models, optimizers, None
+        model_files = os.listdir(model_save_dir)
+        model_max_epoch = max([int(fname.split("_")[1].split(".pth")[0]) for fname in model_files])
+        if max_epoch is None:
+            max_epoch = model_max_epoch
+        assert max_epoch == model_max_epoch
+
+        # Load the model.
+        save_path = os.path.join(model_save_dir, f"epoch_{max_epoch}.pth")
+        checkpoint = torch.load(save_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    return models, optimizers, max_epoch
 
 
 def run_experiment(config: dict):
     """Runs an experiment."""
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    criterion = torch.nn.CrossEntropyLoss()
 
     # Load training parameters.
     out_dir = config['save_dir']
     training_cfg = config['training']
-    save_every = training_cfg['save_every']
-    n_epochs = training_cfg['epochs']
 
     # Load the dataset.
     dataset_cfg = config['datasets']
-    dataset_a_train, dataset_a_test = dataset_cfg['initial']
-    dataset_b_train, dataset_b_test = dataset_cfg['finetune']
-    n_channels = dataset_cfg['params']['n_channels']
+    dataset_a_train, _ = dataset_cfg['initial']
+    dataset_b_train, _ = dataset_cfg['finetune']
 
-    # Load the base model and dataset.
-    base_model = config['base_model']
+    model_names = list(config['schedules'])
+    models = [config['schedules'][name]['model'] for name in model_names]
+    model_infos = [{} for _ in model_names]
+    pre_train_weights = [deepcopy(model.get_conv_weights().detach().clone()) for model in models]
 
-    for schedule_name, training_schedule in config['schedules'].items():
+    # Unconstrain + freeze the models if necessary for finetuning.
+    for name, model in zip(model_names, models):
+        init_params = config['schedules'][name]['initial_train']
+        if init_params['freeze_first_layer']:
+            model.freeze_first_layer()
+        if not init_params['gabor_constrained']:
+            model.unconstrain()
 
-        print("\n" + "=== " + schedule_name + " ===")
+    # Set up the models + data for initial training.
+    optimizers_a = [torch.optim.Adam(
+        model.parameters(), **config['schedules'][name]['initial_train']['optimizer_params']) 
+        for name, model in zip(model_names, models)]
+    dataloader_a = torch.utils.data.DataLoader(dataset_a_train, **training_cfg['dataloader_params'])
+    save_dir_a = os.path.join(out_dir, 'dataset_a')
 
-        model_save_dir = os.path.join(out_dir, "models", schedule_name)
-        os.makedirs(model_save_dir, exist_ok=True)
+    # Resume training if any training has already been done.
+    models, optimizers_a, last_epoch = get_checkpoints(save_dir_a, model_names, models, optimizers_a)
+    starting_epoch_a = last_epoch + 1 if last_epoch is not None else 0
 
-        initial_params = training_schedule['initial_train']
-        model = base_model(is_gabornet=initial_params['gabor_constrained'], n_channels=n_channels, device=device)
-        
-        # Train the model on the first dataset, then on the second dataset.
-        for i, (exp_params, dataset) in enumerate((
-            (training_schedule['initial_train'], dataset_a_train),
-            (training_schedule['finetune'], dataset_b_train))):
+    # Run the initial training.
+    if starting_epoch_a == training_cfg['initial']['epochs']:
+        print("\nFinished training on dataset A.")
+    else:
+        print("\nTraining on dataset A...")
+        train_many(models=models, optimizers=optimizers_a, model_names=model_names, 
+                model_infos=model_infos, dataloader=dataloader_a, save_dir=save_dir_a, device=device, 
+                starting_epoch = starting_epoch_a, n_epochs = training_cfg['initial']['epochs'])
 
-            # Set the model parameters.
-            if not exp_params['gabor_constrained'] and model.is_gabornet:
-                model.unconstrain()
-            if exp_params['freeze_first_layer']:
-                model.freeze_first_layer()
+    # Check that weights changed as expected.
+    post_train_weights = [deepcopy(model.get_conv_weights().detach().clone()) for model in models]
+    for post_train_weight, pre_train_weight, name in zip(post_train_weights, pre_train_weights, model_names):
+        if config['schedules'][name]['initial_train']['freeze_first_layer']:
+            assert torch.allclose(post_train_weight, pre_train_weight), \
+                "Weights should not have changed after initial training."
+        else:
+            assert not torch.allclose(post_train_weight, pre_train_weight), \
+                "Weights should have changed after initial training."
+    
+    # Unconstrain + freeze the models if necessary for finetuning.
+    for name, model in zip(model_names, models):
+        finetune_params = config['schedules'][name]['finetune']
+        if finetune_params['freeze_first_layer']:
+            model.freeze_first_layer()
+        if not finetune_params['gabor_constrained']:
+            model.unconstrain()
 
-            # Load the dataset.
-            trainloader = torch.utils.data.DataLoader(dataset, **training_cfg['dataloader_params'])
-            dataset_name = "a" if i == 0 else "b"
-            log_dir = os.path.join(out_dir, "logs", schedule_name + "_" + dataset_name)
-            os.makedirs(log_dir, exist_ok=True)
+    # Set up the models + data for fine-tuning.
+    dataloader_b = torch.utils.data.DataLoader(dataset_b_train, **training_cfg['dataloader_params'])
+    optimizers_b = [torch.optim.Adam(
+        model.parameters(), **config['schedules'][name]['finetune']['optimizer_params']) 
+        for name, model in zip(model_names, models)]
+    save_dir_b = os.path.join(out_dir, 'dataset_b')
 
-            # Train the model on the first dataset.
-            opt = torch.optim.Adam(model.parameters(), **exp_params['optimizer_params'])
-            pre_train_weights = deepcopy(model.get_conv_weights().detach().clone())
-            if not exp_params['skip']:
-                print("Training on dataset " + dataset_name.upper())
-                train(model, trainloader, criterion=criterion, device=device, optimizer=opt, log_dir=log_dir, 
-                    save_every=save_every, model_save_dir=model_save_dir, model_suffix=dataset_name, 
-                    epochs=n_epochs)
-        
-            # Check that the weights changed.
-            post_train_weights = deepcopy(model.get_conv_weights().detach().clone())
-            weights_changed = not torch.allclose(pre_train_weights, post_train_weights, atol=1e-6)
-            weights_should_change = (not exp_params['skip'] and not exp_params['freeze_first_layer'])
-            assert weights_changed == weights_should_change, \
-                f"Weights should{'' if weights_should_change else ' not'} have changed. Changed? {weights_changed}"
+    # Resume training if any training has already been done.
+    models, optimizers_b, last_epoch = get_checkpoints(save_dir_b, model_names, models, optimizers_b)
+    starting_epoch_b = last_epoch + 1 if last_epoch is not None else 0
+    if starting_epoch_b > 0:
+        assert starting_epoch_a == training_cfg['initial']['epochs'], \
+            "Cannot resume training on dataset B if training on dataset A was not completed."
+
+    # Run the fine-tuning.
+    if starting_epoch_b == training_cfg['finetune']['epochs']:
+        print("\nFinished fine-tuning on dataset B.")
+    else:
+        print("\nFine-tuning on dataset B.")
+        train_many(models=models, optimizers=optimizers_b, model_names=model_names, 
+                model_infos=model_infos, dataloader=dataloader_b, save_dir=save_dir_b, device=device, 
+                starting_epoch = starting_epoch_b, n_epochs = training_cfg['finetune']['epochs'])
+
+    # Check that weights changed as expected.
+    post_finetune_weights = [deepcopy(model.get_conv_weights().detach().clone()) for model in models]
+    for post_finetune_weight, post_train_weight, name in zip(post_finetune_weights, post_train_weights, model_names):
+        if config['schedules'][name]['finetune']['freeze_first_layer']:
+            assert torch.allclose(post_finetune_weight, post_train_weight), \
+                "Weights should not have changed after fine-tuning."
+        else:
+            assert not torch.allclose(post_finetune_weight, post_train_weight), \
+                "Weights should have changed after fine-tuning."
 
 
 def main():
@@ -87,11 +145,14 @@ def main():
     # Parse command line arguments.
     parser = argparse.ArgumentParser(description="Run experiments.")
     parser.add_argument("config", type=str, help="Path to the configuration file.")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing results instead of continuing.")
 
     args = parser.parse_args()
 
     # Parse the configuration file + run the experiment.
     config = parse_config(args.config)
+    if args.overwrite:
+        os.system(f"rm -rf {config['save_dir']}")
 
     # If repeating an experiment multiple times, then fix the directories.
     og_save_dir = config['save_dir']

@@ -22,13 +22,8 @@ def parse_config(config_path: str):
     torch.manual_seed(config['seed'])
     np.random.seed(config['seed'])
 
-    # Load the base model.
-    config['base_model'] = load_model(config['base_model'])
-
     # Load the datasets.
     config['datasets']['initial'], config['datasets']['finetune'] = load_datasets(config['datasets'])
-    # config['initial_dataset'] = load_dataset(config['initial_dataset'], config['n_channels'], config['img_size'])
-    # config['finetune_dataset'] = load_dataset(config['finetune_dataset'], config['n_channels'], config['img_size'])
 
     # Make the save directories.
     os.makedirs(config['save_dir'], exist_ok=True)
@@ -45,6 +40,10 @@ def parse_config(config_path: str):
 
         for stage in stages:
             training_schedule[stage] = {**default_schedule_params, **training_schedule[stage]}
+
+        training_schedule['model'] = load_model(config['base_model'], 
+                                                training_schedule['initial_train']['gabor_constrained'], 
+                                                n_channels=config['datasets']['params']['n_channels'])
 
     return config
 
@@ -100,9 +99,8 @@ def load_datasets(dataset_cfg: dict) -> tuple[torch.utils.data.DataLoader, torch
     
 
 
-def load_model(model_config: dict) -> CNN:
+def load_model(base_model_config: dict, is_gabornet: bool, n_channels: int) -> CNN:
     """Loads the base model."""
 
-    # Load the model.
-    return lambda *args, **kwargs: getattr(sys.modules[__name__], model_config['name'])(
-        *args, kernel_size=model_config['kernel_size'], **kwargs)
+    model_arch = getattr(sys.modules[__name__], base_model_config['name'])
+    return model_arch(is_gabornet, n_channels=n_channels, kernel_size=base_model_config['kernel_size'])
