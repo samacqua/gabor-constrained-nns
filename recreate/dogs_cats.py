@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from train import train_many
-from gabor_layer import GaborConv2d
+from gabor_layer import GaborConv2d, GaborConv2dBuggy, GaborConv2dStillBuggy
 from .dataset import DogsCatsDataset
 
 from torch.utils.tensorboard import SummaryWriter
@@ -35,10 +35,13 @@ class DogCatNNSanity(nn.Module):
     tests, so this serves as a good starting point of something the authors have implemented.
     """
 
-    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True):
+    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True, 
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2d):
         super(DogCatNNSanity, self).__init__()
+
+        self.is_gabornet = is_gabornet
         if is_gabornet:
-            self.g1 = GaborConv2d(3, 32, kernel_size=kernel_size, stride=1)
+            self.g1 = gabor_type(3, 32, kernel_size=kernel_size, stride=1)
         else:
             self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
 
@@ -79,11 +82,13 @@ class DogCatNet(nn.Module):
     parameter counts are equal after the original layer. 
     """
 
-    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False):
+    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False, 
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2d):
         super(DogCatNet, self).__init__()
 
+        self.is_gabornet = is_gabornet
         if is_gabornet:
-            self.g1 = GaborConv2d(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1)
+            self.g1 = gabor_type(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1)
         else:
             self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
 
@@ -93,10 +98,6 @@ class DogCatNet(nn.Module):
         self.c4 = nn.Conv2d(128, 128, kernel_size=(3, 3), stride=1)
 
         self.fc1 = nn.LazyLinear(128)
-        # if is_gabornet:
-        #     self.fc1 = nn.Linear(3200, 128)
-        # else:
-        #     self.fc1 = nn.Linear(128 * 6 * 6, 128)
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, 2)
 
@@ -190,7 +191,7 @@ def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = No
     """Loads a model from a file, with the optimizer and epoch."""
 
     # Load the model.
-    if model.is_gabornet:
+    if model.is_gabornet and isinstance(model.g1, GaborConv2dBuggy):
         # Needed to avoid some memory issues.
         model.g1.x = Parameter(model.g1.x.contiguous())
         model.g1.y = Parameter(model.g1.y.contiguous())
@@ -236,6 +237,7 @@ def main():
     parser.add_argument("--gabor_kernel", type=int, default=15, help="Size of GaborNet kernel.")
     parser.add_argument("--cnn_kernel", type=int, default=5, help="Size of CNN kernel.")
     parser.add_argument("--no_padding", action="store_true", help="Don't use padding to even the paramters.")
+    parser.add_argument("--gabor_type", type=str, default="GaborConv2d", help="Type of GaborNet to use.")
 
     parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
     parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
@@ -257,16 +259,27 @@ def main():
         net_arch = DogCatNNSanity
     else:
         raise ValueError(f"Invalid model {args.model}.")
+    
+    if args.gabor_type == "GaborConv2d":
+        gabor_arch = GaborConv2d
+    elif args.gabor_type == "GaborConv2dBuggy":
+        gabor_arch = GaborConv2dBuggy
+    elif args.gabor_type == "GaborConv2dStillBuggy":
+        gabor_arch = GaborConv2dStillBuggy
+    else:
+        raise ValueError(f"Invalid GaborNet type {args.gabor_type}.")
 
     cnn_checkpoint, gabor_checkpoint = None, None
     if args.resume:
-        # Find the latest version of the model. fnames of form: "{model_name}_epoch_{epoch}.pth"
-        fnames = [fname for fname in os.listdir(save_dir) if fname.endswith(".pth")]
-        cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in fnames if "cnn" in fname])
-        gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in fnames if "gabor" in fname])
+        cnn_dir = os.path.join(save_dir, "models", "cnn")
+        cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(cnn_dir)])
+        cnn_checkpoint = torch.load(os.path.join(cnn_dir, f"epoch_{cnn_epoch}.pth"))
+
+        gabor_dir = os.path.join(save_dir, "models", "gabornet")
+        gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(gabor_dir)])
+        gabor_checkpoint = torch.load(os.path.join(gabor_dir, f"epoch_{gabor_epoch}.pth"))
+
         assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs do not match."
-        cnn_checkpoint = torch.load(os.path.join(save_dir, f"cnn_epoch_{cnn_epoch}.pth"))
-        gabor_checkpoint = torch.load(os.path.join(save_dir, f"gabornet_epoch_{gabor_epoch}.pth"))
 
     # Save the arguments.
     with open(os.path.join(save_dir, "args.json"), "w") as f:
@@ -296,8 +309,10 @@ def main():
         gabor_padding, cnn_padding = determine_padding(net_arch, args.gabor_kernel, args.cnn_kernel)
     else:
         gabor_padding, cnn_padding = False, False
-    gabornet = net_arch(is_gabornet=True, kernel_size=args.gabor_kernel, add_padding=gabor_padding).to(device)
-    cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding).to(device)
+    gabornet = net_arch(is_gabornet=True, kernel_size=args.gabor_kernel, add_padding=gabor_padding, 
+                        gabor_type=gabor_arch).to(device)
+    cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding, 
+                   gabor_type=gabor_arch).to(device)
     gabornet_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
     cnn_optimizer = OPT(cnn.parameters(), lr=LR, betas=BETAS)
 

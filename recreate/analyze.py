@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .dogs_cats import DogCatNNSanity, DogCatNet, load_dataset, load_net
-from .dataset import DogsCatsDataset
+from analysis import test_accuracy
 
 
 def make_accuracy_fig(gabor_train: dict[int, float], cnn_train: dict[int, float], gabor_test: dict[int, float], 
@@ -79,71 +79,16 @@ def calc_accuracies(gabor_models: dict[int, torch.nn.Module], cnn_models: dict[i
     else:
 
         # Calculate the accuracies over the train set.
-        print("Calculating train accuracy...")
         gabor_train_accs = {}
         cnn_train_accs = {}
-        for epoch in tqdm(epochs):
-            gabor_model, cnn_model = gabor_models[epoch], cnn_models[epoch]
-            gabor_model.eval()
-            cnn_model.eval()
-                
-            # Calculate the accuracy over the train set.
-            gabor_correct = 0
-            cnn_correct = 0
-            for data in train_loader:
-                
-                # Get the predictions.
-                x, y = data["image"], data["target"]
-                gabor_out = gabor_model(x)
-                cnn_out = cnn_model(x)
-                gabor_pred = gabor_out.argmax(dim=1)
-                cnn_pred = cnn_out.argmax(dim=1)
-
-                # Update the correct counts.
-                gabor_correct += (gabor_pred == y).sum().item()
-                cnn_correct += (cnn_pred == y).sum().item()
-
-            # Calculate the accuracies.
-            gabor_acc = gabor_correct / len(train_loader.dataset)
-            cnn_acc = cnn_correct / len(train_loader.dataset)
-
-            # Save the accuracies.
-            gabor_train_accs[epoch] = gabor_acc
-            cnn_train_accs[epoch] = cnn_acc
-
-        # Calculate the accuracies over the test set.
-        print("Calculating test accuracy...")
         gabor_test_accs = {}
         cnn_test_accs = {}
 
         for epoch in tqdm(epochs):
-            gabor_model, cnn_model = gabor_models[epoch], cnn_models[epoch]
-            gabor_model.eval()
-            cnn_model.eval()
-                    
-            # Calculate the accuracy over the test set.
-            gabor_correct = 0
-            cnn_correct = 0
-            for data in test_loader:
-
-                # Get the predictions.
-                x, y = data["image"], data["target"]
-                gabor_out = gabor_model(x)
-                cnn_out = cnn_model(x)
-                gabor_pred = gabor_out.argmax(dim=1)
-                cnn_pred = cnn_out.argmax(dim=1)
-
-                # Update the correct counts.
-                gabor_correct += (gabor_pred == y).sum().item()
-                cnn_correct += (cnn_pred == y).sum().item()
-
-            # Calculate the accuracies.
-            gabor_acc = gabor_correct / len(test_loader.dataset)
-            cnn_acc = cnn_correct / len(test_loader.dataset)
-
-            # Save the accuracies.
-            gabor_test_accs[epoch] = gabor_acc
-            cnn_test_accs[epoch] = cnn_acc
+            gabor_train_accs[epoch] = test_accuracy(gabor_models[epoch], train_loader)
+            cnn_train_accs[epoch] = test_accuracy(cnn_models[epoch], train_loader)
+            gabor_test_accs[epoch] = test_accuracy(gabor_models[epoch], test_loader)
+            cnn_test_accs[epoch] = test_accuracy(cnn_models[epoch], test_loader)
 
         # Save the accuracies.
         with open(save_path, "wb") as f:
@@ -181,6 +126,17 @@ def load_models(model_dir: str, base_model: torch.nn.Module = Type[torch.nn.Modu
             model_dict[epoch + 1] = model   # Epochs are 0-indexed in files, but we want 1-indexed.
 
     return gabor_models, cnn_models
+
+
+def get_conv_weights(model) -> torch.Tensor:
+    """Gets the weights of the first convolutional layer."""
+
+    # Since the weights aren't updated directly (the parameters of the Gabor equation are), we need to update the
+    # weights before returning them.
+    if model.is_gabornet:
+        return model.g1.calculate_weights()
+
+    return model.g1.weight
 
 
 def main():
@@ -234,6 +190,15 @@ def main():
     print("Loading models...")
     epochs = range(0, 100, args.calc_every)
     gabor_models, cnn_models = load_models(save_dir, base_model, epochs_to_load=epochs)
+
+    # # Show the accuracies.
+    # first_epoch = min(gabor_models.keys())
+    # for epoch in gabor_models:
+    #     if epoch == first_epoch:
+    #         continue
+
+    #     assert torch.allclose(get_conv_weights(gabor_models[first_epoch]), get_conv_weights(gabor_models[epoch]))
+    # import pdb; pdb.set_trace()
 
     # Data from the paper.
     gabor_train_reported = {1: 0.503, 3: 0.597, 10: 0.682, 40: 0.747} #, 90: 0.796}
