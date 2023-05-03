@@ -14,7 +14,7 @@ def train_many(models: list[nn.Module], optimizers: list[optim.Optimizer], model
                starting_epoch: int = 0, n_epochs: int = 40, criterion: torch.nn.Module = nn.CrossEntropyLoss()):
     """Trains multiple models."""
     
-    writer = SummaryWriter(log_dir=save_dir)
+    writer = SummaryWriter(log_dir=os.path.join(save_dir, "tensorboard"))
     for model in models:
         model.train()
 
@@ -26,10 +26,9 @@ def train_many(models: list[nn.Module], optimizers: list[optim.Optimizer], model
         correct = {name: [] for name in model_names}
         n_total = []
     
-        for i, data in enumerate(tqdm(dataloader)):
+        for i, (inputs, labels) in enumerate(tqdm(dataloader)):
 
             batch_idx = epoch * len(dataloader) + i
-            inputs, labels = data["image"], data["target"]
 
             for model, optimizer, name in zip(models, optimizers, model_names):
 
@@ -54,6 +53,8 @@ def train_many(models: list[nn.Module], optimizers: list[optim.Optimizer], model
 
         # Save the model + optimizer state.
         for model, optimizer, name, model_info in zip(models, optimizers, model_names, model_infos):
+            model_save_dir = os.path.join(save_dir, "models", name)
+            os.makedirs(model_save_dir, exist_ok=True)
             torch.save({
                 **{'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -62,9 +63,7 @@ def train_many(models: list[nn.Module], optimizers: list[optim.Optimizer], model
                 'correct': correct[name],
                 'n_total': n_total},
                 **model_info,
-            }, os.path.join(save_dir, f"{name}_epoch_{epoch}.pth"))
-
-    print("Finished Training")
+            }, os.path.join(model_save_dir, f"epoch_{epoch}.pth"))
 
 
 def train(model: torch.nn.Module, train_loader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer, 
