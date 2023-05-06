@@ -59,7 +59,6 @@ class GaborBase(nn.Module):
         except:
             layer.bias.requires_grad = False
 
-
     def freeze_first_layer(self):
         """Freezes the first layer."""
         self._freeze_layer(self.conv1)
