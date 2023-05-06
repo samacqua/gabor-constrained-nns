@@ -173,7 +173,40 @@ def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, b
     plt.show()
 
 
-def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, test_loader, device, save_dir):
+def fgsm_attack(image, epsilon, data_grad):
+    # Collect the element-wise sign of the data gradient
+    sign_data_grad = data_grad.sign()
+    # Create the perturbed image by adjusting each pixel of the input image
+    perturbed_image = image + epsilon*sign_data_grad
+    # Adding clipping to maintain [-1,1] range
+    perturbed_image = torch.clamp(perturbed_image, -1, 1)
+    # Return the perturbed image
+    return perturbed_image
+
+  
+def adversarial_attack(model, x, y, device, epsilon=0.1):
+    """Returns the adversarial example that is perturbed by epsilon."""
+
+    x = x.clone().unsqueeze(0)
+    x.requires_grad = True
+
+    # Forward pass the data through the model + backpropogate the error.
+    output = model(x)
+    loss = torch.nn.CrossEntropyLoss()(output, y.unsqueeze(0))
+    model.zero_grad()
+    loss.backward()
+    data_grad = x.grad.data
+
+    # Call FGSM Attack
+    x_adv = fgsm_attack(x, epsilon, data_grad)
+
+    # Re-classify the perturbed image
+    output_adversarial = model(x_adv)
+
+    return x_adv, output, output_adversarial
+
+
+def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, test_loader, device, save_dir, epsilon=0.1):
     """Tests the hypothesis: Gabor-constrained neural networks will be more robust to adversarial attacks.
 
     Expects that the models are finetuned to the same accuracy or loss.
@@ -206,37 +239,6 @@ def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, te
     if len(gabor_correct) < N_exs or len(unconstrained_correct) < N_exs:
         raise ValueError("Not enough examples were sampled.")
 
-    def fgsm_attack(image, epsilon, data_grad):
-        # Collect the element-wise sign of the data gradient
-        sign_data_grad = data_grad.sign()
-        # Create the perturbed image by adjusting each pixel of the input image
-        perturbed_image = image + epsilon*sign_data_grad
-        # Adding clipping to maintain [0,1] range
-        perturbed_image = torch.clamp(perturbed_image, 0, 1)
-        # Return the perturbed image
-        return perturbed_image
-    
-    def adversarial_attack(model, x, y, device, epsilon=0.1):
-        """Returns the adversarial example that is perturbed by epsilon."""
-
-        x = x.clone().unsqueeze(0)
-        x.requires_grad = True
-
-        # Forward pass the data through the model + backpropogate the error.
-        output = model(x)
-        loss = torch.nn.CrossEntropyLoss()(output, y.unsqueeze(0))
-        model.zero_grad()
-        loss.backward()
-        data_grad = x.grad.data
-
-        # Call FGSM Attack
-        x_adv = fgsm_attack(x, epsilon, data_grad)
-
-        # Re-classify the perturbed image
-        output_adversarial = model(x_adv)
-
-        return x_adv, output, output_adversarial
-
     # For each high-confidence instance, find the adversarial example that makes it classified as the wrong class.
     gabor_adversaries = []
     unconstrained_adversaries = []
@@ -246,7 +248,7 @@ def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, te
         [gabor_adversaries, unconstrained_adversaries]):
 
         for x, y in tqdm(correct_data):
-            x_adv, og_output, adversarial_output = adversarial_attack(model, x, y, device, epsilon=0.1)
+            x_adv, og_output, adversarial_output = adversarial_attack(model, x, y, device, epsilon=epsilon)
             
             # Normalize the outputs.
             og_output = torch.nn.functional.softmax(og_output, dim=1)[0,y.item()]
@@ -273,11 +275,11 @@ def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, te
     # Check if statistically significant.
     # Between the distances.
     t, p = stats.ttest_ind(gabor_distances, unconstrained_distances)
-    print(f"t: {t}, p: {p}")
+    print(f"conf t: {t}, p: {p}")
 
     # Between the image differences.
     t, p = stats.ttest_ind(gabor_img_diffs, unconstrained_img_diffs)
-    print(f"t: {t}, p: {p}")
+    print(f"img t: {t}, p: {p}")
 
     # Print the result.
     print(f"Gabor confidence difference: {np.mean(gabor_distances):.3f} {np.std(gabor_distances):.3f}")
@@ -318,6 +320,7 @@ def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Modu
     """Tests the accuracy of a model."""
     
     model.eval()
+    model.to(device)
     correct = 0
     total = 0
     with torch.no_grad():
@@ -334,7 +337,7 @@ def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Modu
 def load_model(base_model: torch.nn.Module, is_gabornet: bool, n_channels: int, save_path: str):
     """Loads a model."""
 
-    model = base_model(is_gabornet=is_gabornet, n_channels=n_channels)
+    model = base_model      # (is_gabornet=is_gabornet, n_channels=n_channels)
     try:
         model.load_state_dict(torch.load(save_path))
     except FileNotFoundError:
@@ -356,7 +359,7 @@ def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[tor
     models = {}
     for model_sequence in os.listdir(model_save_dir):
 
-        # Skip if not simple gabor or cnn.
+        # If not simple gabor or cnn.
         if model_sequence not in ['gabor', 'cnn', 'baseline']:
             continue
 
@@ -365,12 +368,13 @@ def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[tor
         # Load the model after training on the first dataset.
         model_a_path = os.path.join(sequence_path, "model_a.pt")
         init_cfg = config['schedules'][model_sequence]['initial_train']
-        model_a = load_model(base_model, init_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_a_path)
+        model_base = config['schedules'][model_sequence]['model']
+        model_a = model_base    # load_model(model_base, init_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_a_path)
 
         # Load the model after training on the second dataset.
         model_b_path = os.path.join(sequence_path, "model_b.pt")
         finetune_cfg = config['schedules'][model_sequence]['finetune']
-        model_b = load_model(base_model, finetune_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_b_path)
+        model_b = model_base    # load_model(model_base, finetune_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_b_path)
 
         # Load models saved during training. Only load if specified to save loading time.
         intermediate_a = {}
@@ -495,8 +499,10 @@ def main():
         gabor_finetune_model = models['gabor'][1]
         cnn_finetune_model = models['cnn'][1]
         test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
-                                    save_dir=os.path.join(analysis_dir, 'adversarial'))
+                                    save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.05)
 
+        test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
+                                    save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.3)
 
 if __name__ == '__main__':
     main()
