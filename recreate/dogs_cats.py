@@ -34,12 +34,12 @@ class DogCatNNSanity(nn.Module):
     """
 
     def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2d):
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu"):
         super(DogCatNNSanity, self).__init__()
 
         self.is_gabornet = is_gabornet
         if is_gabornet:
-            self.g1 = gabor_type(3, 32, kernel_size=kernel_size, stride=1)
+            self.g1 = gabor_type(3, 32, kernel_size=kernel_size, stride=1, device=device)
         else:
             self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
 
@@ -81,12 +81,12 @@ class DogCatNet(nn.Module):
     """
 
     def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2d):
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu"):
         super(DogCatNet, self).__init__()
 
         self.is_gabornet = is_gabornet
         if is_gabornet:
-            self.g1 = gabor_type(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1)
+            self.g1 = gabor_type(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1, device=device)
         else:
             self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
 
@@ -262,15 +262,17 @@ def main():
 
     cnn_checkpoint, gabor_checkpoint = None, None
     if args.resume:
-        cnn_dir = os.path.join(save_dir, "models", "cnn")
-        cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(cnn_dir)])
-        cnn_checkpoint = torch.load(os.path.join(cnn_dir, f"epoch_{cnn_epoch}.pth"))
+        if args.cnn_or_gabor is None or args.cnn_or_gabor == 'cnn':
+            cnn_dir = os.path.join(save_dir, "models", "cnn")
+            cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(cnn_dir)])
+            cnn_checkpoint = torch.load(os.path.join(cnn_dir, f"epoch_{cnn_epoch}.pth"))
+        if args.cnn_or_gabor is None or args.cnn_or_gabor == 'gabor':
+            gabor_dir = os.path.join(save_dir, "models", "gabornet")
+            gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(gabor_dir)])
+            gabor_checkpoint = torch.load(os.path.join(gabor_dir, f"epoch_{gabor_epoch}.pth"))
 
-        gabor_dir = os.path.join(save_dir, "models", "gabornet")
-        gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(gabor_dir)])
-        gabor_checkpoint = torch.load(os.path.join(gabor_dir, f"epoch_{gabor_epoch}.pth"))
-
-        assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs do not match."
+        if args.cnn_or_gabor is None:
+            assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs do not match."
 
     # Save the arguments.
     with open(os.path.join(save_dir, "args.json"), "w") as f:
@@ -279,7 +281,7 @@ def main():
     # Hyperparameters from paper.
     BATCH_SIZE = 64
     OPT = optim.AdamW
-    N_EPOCHS = 25
+    N_EPOCHS = 30
     LR = 0.001
     BETAS = (0.9, 0.999)
 
@@ -290,12 +292,11 @@ def main():
     # Paper says they use 30% of the trainset as the validation set.
     # Just going to do that via code.
     # N = 128
-    # train_set, _ = torch.utils.data.random_split(
-    #     train_set, [N, len(train_set) - N]
-    # )
+    N = int(len(train_set) * 0.7)
     train_set, _ = torch.utils.data.random_split(
-        train_set, [int(len(train_set) * 0.7), int(len(train_set) * 0.3)]
+        train_set, [N, len(train_set) - N]
     )
+    
     train = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -305,19 +306,20 @@ def main():
     else:
         gabor_padding, cnn_padding = False, False
     gabornet = net_arch(is_gabornet=True, kernel_size=args.gabor_kernel, add_padding=gabor_padding, 
-                        gabor_type=gabor_arch).to(device)
+                        gabor_type=gabor_arch, device=device).to(device)
     cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding, 
                    gabor_type=gabor_arch).to(device)
     gabornet_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
     cnn_optimizer = OPT(cnn.parameters(), lr=LR, betas=BETAS)
 
     starting_epoch = 0
-    if cnn_checkpoint and gabor_checkpoint:
-        gabornet, gabornet_optimizer, last_epoch_gabor = load_net(gabor_checkpoint, gabornet, gabornet_optimizer)
-        starting_epoch = last_epoch_gabor + 1
-
-        cnn, cnn_optimizer, last_epoch_cnn = load_net(cnn_checkpoint, cnn, cnn_optimizer)
-        assert starting_epoch == last_epoch_cnn + 1
+    if gabor_checkpoint:
+        gabornet, gabornet_optimizer, last_epoch = load_net(gabor_checkpoint, gabornet, gabornet_optimizer)
+        starting_epoch = last_epoch + 1
+    if cnn_checkpoint:
+        cnn, cnn_optimizer, last_epoch = load_net(cnn_checkpoint, cnn, cnn_optimizer)
+        assert (starting_epoch == last_epoch + 1) or args.cnn_or_gabor == 'cnn', "CNN and GaborNet epochs do not match."
+        starting_epoch = last_epoch + 1
 
     # Freeze the CNN layer.
     if args.freeze_cnn_first_layer:
@@ -329,7 +331,7 @@ def main():
     optimizers = [gabornet_optimizer, cnn_optimizer]
     model_names = ["gabornet", "cnn"]
     model_infos = [
-        {'kernel_size': args.gabor_kernel, 'add_padding': gabor_padding},
+        {'kernel_size': args.gabor_kernel, 'add_padding': gabor_padding, "gabor_type": args.gabor_type},
         {'kernel_size': args.cnn_kernel, 'add_padding': cnn_padding}
     ]
 
