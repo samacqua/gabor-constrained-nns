@@ -27,6 +27,7 @@ class GaborConv2dStillBuggy(Module):
         groups=1,
         bias=False,
         padding_mode="zeros",
+        device="cpu",
     ):
         super().__init__()
 
@@ -154,6 +155,7 @@ class GaborConv2dBuggy(Module):
         groups=1,
         bias=False,
         padding_mode="zeros",
+        device="cpu",
     ):
         super().__init__()
 
