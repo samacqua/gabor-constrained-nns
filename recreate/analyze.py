@@ -91,16 +91,13 @@ def calc_accuracies(gabor_models: dict[int, torch.nn.Module], cnn_models: dict[i
         gabor_test_accs = {}
         cnn_test_accs = {}
 
-        with tqdm(total=len(epochs) * 4) as pbar:
+        n_iters = len(epochs) * (len(train_loader) * 2 + len(test_loader) * 2)
+        with tqdm(total=n_iters, maxinterval=5) as pbar:
             for epoch in epochs:
-                gabor_train_accs[epoch] = test_accuracy(train_loader, gabor_models[epoch], device=device)
-                pbar.update(1)
-                cnn_train_accs[epoch] = test_accuracy(train_loader, cnn_models[epoch], device=device)
-                pbar.update(1)
-                gabor_test_accs[epoch] = test_accuracy(test_loader, gabor_models[epoch], device=device)
-                pbar.update(1)
-                cnn_test_accs[epoch] = test_accuracy(test_loader, cnn_models[epoch], device=device)
-                pbar.update(1)
+                gabor_train_accs[epoch] = test_accuracy(train_loader, gabor_models[epoch], device=device, pbar=pbar)
+                cnn_train_accs[epoch] = test_accuracy(train_loader, cnn_models[epoch], device=device, pbar=pbar)
+                gabor_test_accs[epoch] = test_accuracy(test_loader, gabor_models[epoch], device=device, pbar=pbar)
+                cnn_test_accs[epoch] = test_accuracy(test_loader, cnn_models[epoch], device=device, pbar=pbar)
 
         # Save the accuracies.
         with open(save_path, "wb") as f:
@@ -110,7 +107,7 @@ def calc_accuracies(gabor_models: dict[int, torch.nn.Module], cnn_models: dict[i
 
 
 def load_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_load: set[int] = None,
-                gabor_models_dir: str = None, cnn_models_dir: str = None, gabor_type = GaborConv2d,
+                gabor_models_dir: str = None, cnn_models_dir: str = None, gabor_type = GaborConv2d, device: str = 'cpu'
                 ) -> tuple[dict[int, torch.nn.Module], dict[int, torch.nn.Module]]:
     """Loads the Gabor + CNN models."""
 
@@ -130,7 +127,7 @@ def load_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_l
             if epochs_to_load is not None and epoch not in epochs_to_load:
                 continue
 
-            checkpoint = torch.load(os.path.join(model_dir, fname))
+            checkpoint = torch.load(os.path.join(model_dir, fname), map_location=device)
 
             kernel_size = checkpoint.get("kernel_size", (15, 15) if is_gabornet else (5, 5))
             add_padding = checkpoint.get("add_padding", False)
@@ -138,7 +135,7 @@ def load_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_l
             gabor_type = globals()[gabor_type_str] if gabor_type_str else gabor_type
 
             model = base_model(is_gabornet=is_gabornet, kernel_size=kernel_size, add_padding=add_padding, 
-                            gabor_type=gabor_type)
+                            gabor_type=gabor_type, device=device)
             model, _, model_epoch = load_net(checkpoint, model)
 
             assert epoch == model_epoch
@@ -176,6 +173,7 @@ def main():
 
     parser.add_argument("--model", type=str, default="DogCatNet", help="The base model to use for the CNNs.",
                         choices=["DogCatNet", "DogCatNNSanity"])
+    parser.add_argument("--dataset_dir", type=str, default=None, help="Path to dataset.")
     
     parser.add_argument("--gabor_dir", type=str, default=None, 
                         help="Name of directory to load Gabor models from. Defaults to dir_name.")
@@ -202,7 +200,7 @@ def main():
     # Load the testset.
     print("Loading dataset...")
     torch.manual_seed(args.seed)
-    train_set, test_set = load_dataset(train_args['dataset_dir'], 
+    train_set, test_set = load_dataset(args.dataset_dir or train_args['dataset_dir'], 
                                        img_size=(train_args['img_size'], train_args['img_size']))
 
     # Split the trainset into train and test.
@@ -233,7 +231,7 @@ def main():
     cnn_models_dir = os.path.join(cnn_dir, "models")
     gabor_models, cnn_models = load_models(base_model, epochs_to_load=epochs, 
                                            gabor_models_dir=gabor_models_dir, cnn_models_dir=cnn_models_dir, 
-                                           gabor_type=globals()[args.gabor_type])
+                                           gabor_type=globals()[args.gabor_type], device=device)
 
     # # Show the accuracies.
     # first_epoch = min(gabor_models.keys())
