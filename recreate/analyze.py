@@ -192,6 +192,9 @@ def main():
     # If we are not re-calculating the weights, we don't care if extra parameters are loaded.
     # This is only necessary because some checkpoints had cuda bug where not everything was saved properly.
     parser.add_argument("--no_weight_calc", action="store_true", help="Flag to not re-calculate weights on forward pass.")
+
+    parser.add_argument("--assert_gabor_frozen", action="store_true", help="If True, then will assert that the weights of the model did not change during training.")
+    parser.add_argument("--assert_cnn_frozen", action="store_true", help="If True, then will assert that the weights of the model did not change during training.")
     
     args = parser.parse_args()
 
@@ -242,13 +245,22 @@ def main():
                                            gabor_models_dir=gabor_models_dir, cnn_models_dir=cnn_models_dir, 
                                            gabor_type=globals()[args.gabor_type], device=device, calc_weights=not args.no_weight_calc)
 
-    # # Show the accuracies.
-    # first_epoch = min(gabor_models.keys())
-    # for epoch in gabor_models:
-    #     if epoch == first_epoch:
-    #         continue
+    # Show the accuracies.
+    if args.assert_gabor_frozen or args.assert_cnn_frozen:
+        first_epoch = min(gabor_models.keys())
+        for epoch in gabor_models:
+            if epoch == first_epoch:
+                continue
+            
+            if args.assert_gabor_frozen:
+                for param in ['freq', 'theta', 'psi', 'sigma', 'weight', 'x0', 'y0']:
+                    assert torch.allclose(getattr(gabor_models[first_epoch].g1, param), 
+                                          getattr(gabor_models[epoch].g1, param))
 
-    #     assert torch.allclose(get_conv_weights(gabor_models[first_epoch]), get_conv_weights(gabor_models[epoch]))
+            if args.assert_cnn_frozen:
+                for param in ['weight', 'bias']:
+                    assert torch.allclose(getattr(cnn_models[first_epoch].g1, param), 
+                                          getattr(cnn_models[epoch].g1, param))
 
     # Data from the paper.
     gabor_train_reported = {1: 0.503, 3: 0.597, 10: 0.682, 40: 0.747} #, 90: 0.796}
