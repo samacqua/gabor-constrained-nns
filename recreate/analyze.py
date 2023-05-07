@@ -82,7 +82,7 @@ def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, 
         with open(cache_path, "r") as f:
             accuracy_dict = json.load(f)
         if accuracy_dict["n_samples"] >= len(dataloader.dataset):
-            accuracies = {int(k): v for k, v in accuracy_dict["accuracies"].items()}
+            accuracies = {int(k): v for k, v in accuracy_dict["accuracies"].items() if int(k) in models}
 
     for epoch, model in models.items():
 
