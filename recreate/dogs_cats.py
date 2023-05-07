@@ -184,7 +184,7 @@ def determine_padding(model_arch: Type[torch.nn.Module], gabor_kernel: tuple[int
     return gabor_padding, cnn_padding
 
 
-def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = None
+def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = None, strict: bool = True
              ) -> tuple[nn.Module, optim.Optimizer, int]:
     """Loads a model from a file, with the optimizer and epoch."""
 
@@ -196,7 +196,7 @@ def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = No
         model.g1.x_grid = Parameter(model.g1.x_grid.contiguous())
         model.g1.y_grid = Parameter(model.g1.y_grid.contiguous())
 
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
 
     # Load the optimizer.
     if optimizer:

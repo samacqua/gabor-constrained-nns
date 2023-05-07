@@ -287,9 +287,10 @@ class GaborConv2d(_ConvNd):
         self.y0 = torch.ceil(torch.Tensor([self.kernel_size[1] / 2]))[0]
 
         self.device = device
+        self.calc_weights = True    # TODO: re-run buggy experiments so this isn't necessary.
 
     def forward(self, input_image):
-        weight = self.calculate_weights()
+        weight = self.calculate_weights() if self.calc_weights else self.weight.data
         return F.conv2d(input_image, weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
     def calculate_weights(self):

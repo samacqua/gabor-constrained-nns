@@ -107,7 +107,8 @@ def calc_accuracies(gabor_models: dict[int, torch.nn.Module], cnn_models: dict[i
 
 
 def load_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_load: set[int] = None,
-                gabor_models_dir: str = None, cnn_models_dir: str = None, gabor_type = GaborConv2d, device: str = 'cpu'
+                gabor_models_dir: str = None, cnn_models_dir: str = None, gabor_type = GaborConv2d, device: str = 'cpu',
+                calc_weights: bool = True,
                 ) -> tuple[dict[int, torch.nn.Module], dict[int, torch.nn.Module]]:
     """Loads the Gabor + CNN models."""
 
@@ -136,7 +137,10 @@ def load_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_l
 
             model = base_model(is_gabornet=is_gabornet, kernel_size=kernel_size, add_padding=add_padding, 
                             gabor_type=gabor_type, device=device)
-            model, _, model_epoch = load_net(checkpoint, model)
+            model, _, model_epoch = load_net(checkpoint, model, strict=calc_weights)
+
+            # TODO: re-run buggy experiments so this isn't necessary.
+            model.calc_weights = calc_weights
 
             assert epoch == model_epoch
             model_dict[epoch + 1] = model   # Epochs are 0-indexed in files, but we want 1-indexed.
@@ -183,6 +187,11 @@ def main():
     # TODO: deprecate.
     parser.add_argument("--gabor_type", type=str, default="GaborConv2d", help="Type of GaborNet to use. If specified in model save dict will use that. This is for backwards compatibility.", 
                         choices=["GaborConv2d", "GaborConv2dBuggy", "GaborConv2dStillBuggy"])
+    
+    # TODO: re-run all buggy experiments so this isn't necessary.
+    # If we are not re-calculating the weights, we don't care if extra parameters are loaded.
+    # This is only necessary because some checkpoints had cuda bug where not everything was saved properly.
+    parser.add_argument("--no_weight_calc", action="store_true", help="Flag to not re-calculate weights on forward pass.")
     
     args = parser.parse_args()
 
@@ -231,7 +240,7 @@ def main():
     cnn_models_dir = os.path.join(cnn_dir, "models")
     gabor_models, cnn_models = load_models(base_model, epochs_to_load=epochs, 
                                            gabor_models_dir=gabor_models_dir, cnn_models_dir=cnn_models_dir, 
-                                           gabor_type=globals()[args.gabor_type], device=device)
+                                           gabor_type=globals()[args.gabor_type], device=device, calc_weights=not args.no_weight_calc)
 
     # # Show the accuracies.
     # first_epoch = min(gabor_models.keys())
