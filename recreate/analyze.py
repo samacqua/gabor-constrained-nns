@@ -76,11 +76,13 @@ def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, 
     accuracies = {}
     pbar = tqdm(total=len(models) * len(dataloader)) if pbar is None else pbar
 
-    # Load from cache if possible.
+    # Load from cache if it exists and was calculated with at least as many samples as the current request.
     if cache_path and os.path.exists(cache_path) and use_cache:
         assert cache_path.endswith(".json"), "Cache path must be a JSON file."
         with open(cache_path, "r") as f:
-            accuracies = {int(k): v for k, v in json.load(f).items()}
+            accuracy_dict = json.load(f)
+        if accuracy_dict["n_samples"] >= len(dataloader.dataset):
+            accuracies = {int(k): v for k, v in accuracy_dict["accuracies"].items()}
 
     for epoch, model in models.items():
 
@@ -96,7 +98,7 @@ def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, 
     if cache_path:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         with open(cache_path, "w") as f:
-            json.dump(accuracies, f)
+            json.dump({"n_samples": len(dataloader.dataset), "accuracies": accuracies}, f)
 
     return accuracies
 
