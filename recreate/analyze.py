@@ -225,7 +225,7 @@ def load_models(base_model: Type[torch.nn.Module], epochs_to_load: set[int] | No
             add_padding = False
             
             c = input(f"updating checkpoint {checkpoint_path} with gabor type {gabor_type}, kernel size {kernel_size}, "
-                      " and add padding {add_padding}. Continue? (y/n)")
+                      f" and add padding {add_padding}. Continue? (y/n)")
             if c == "y":
                 checkpoint = update_checkpoint(checkpoint, gabor_type, kernel_size, add_padding, checkpoint_path)
             else:
@@ -262,6 +262,8 @@ def load_cnn_gabor_models(base_model: torch.nn.Module = Type[torch.nn.Module], e
                                calc_weights, train_args)
     cnn_models = load_models(base_model, epochs_to_load, os.path.join(cnn_models_dir, "cnn"), device, calc_weights, 
                              train_args)
+    
+    assert len(gabor_models) == len(cnn_models)
 
     return gabor_models, cnn_models
 

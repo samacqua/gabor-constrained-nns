@@ -99,13 +99,14 @@ def main():
             else:
                 assert dataset_dir == exp_args['dataset_dir'], "Dataset directories are not the same."
 
+    epochs = [epoch - 1 for epoch in args.epochs]
 
     # Load the models.
     models = {}
     for model_name, model_dir in model_dirs.items():
         accuracy_dir = get_acc_path(model_dir)
         models[model_name] = {
-            "checkpoints": load_models(base_model, args.epochs, model_dir, device, calc_weights=False),
+            "checkpoints": load_models(base_model, epochs, model_dir, device, calc_weights=False),
             "save_dir": accuracy_dir
             }
         
