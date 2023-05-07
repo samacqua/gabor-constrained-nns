@@ -345,7 +345,7 @@ def main():
     model_names = ["gabornet", "cnn"]
     model_infos = [
         {'kernel_size': args.gabor_kernel, 'add_padding': gabor_padding, "gabor_type": args.gabor_type},
-        {'kernel_size': args.cnn_kernel, 'add_padding': cnn_padding}
+        {'kernel_size': args.cnn_kernel, 'add_padding': cnn_padding, "gabor_type": None}
     ]
 
     # Only train one model.
