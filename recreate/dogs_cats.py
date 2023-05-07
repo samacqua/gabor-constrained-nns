@@ -34,14 +34,14 @@ class DogCatNNSanity(nn.Module):
     """
 
     def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu"):
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu", bias: bool = True):
         super(DogCatNNSanity, self).__init__()
 
         self.is_gabornet = is_gabornet
         if is_gabornet:
             self.g1 = gabor_type(3, 32, kernel_size=kernel_size, stride=1, device=device)
         else:
-            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
+            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1, bias=bias)
 
         self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=2)
         self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=2)
@@ -81,14 +81,14 @@ class DogCatNet(nn.Module):
     """
 
     def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu"):
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu", bias: bool = True):
         super(DogCatNet, self).__init__()
 
         self.is_gabornet = is_gabornet
         if is_gabornet:
             self.g1 = gabor_type(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1, device=device)
         else:
-            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1)
+            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1, bias=bias)
 
         self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1)
         self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=1)
@@ -240,6 +240,7 @@ def main():
     parser.add_argument("--gabor_type", type=str, default="GaborConv2d", help="Type of GaborNet to use.", 
                         choices=["GaborConv2d", "GaborConv2dBuggy", "GaborConv2dStillBuggy"])
     parser.add_argument("--freeze_cnn_first_layer", action="store_true", help="Freeze the first layer of the CNN.")
+    parser.add_argument("--init_cnn_with_gabor", action="store_true", help="Initialize CNN with GaborNet weights.")
 
     parser.add_argument("--cnn_or_gabor", type=str, default=None, help="Which model to train.", choices=["cnn", "gabor"])
 
@@ -247,6 +248,9 @@ def main():
     parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
 
     args = parser.parse_args()
+
+    # If initializing the CNN with the GaborNet weights, the CNN should not have a bias.
+    cnn_bias = not args.init_cnn_with_gabor
 
     rand_seed = args.seed if args.seed is not None else np.random.randint(0, 10000)
     save_dir = os.path.join("recreate/out/", (args.dir_name or f"seed_{rand_seed}/"))
@@ -308,7 +312,16 @@ def main():
     gabornet = net_arch(is_gabornet=True, kernel_size=args.gabor_kernel, add_padding=gabor_padding, 
                         gabor_type=gabor_arch, device=device).to(device)
     cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding, 
-                   gabor_type=gabor_arch).to(device)
+                   gabor_type=gabor_arch, bias=cnn_bias).to(device)
+
+    # Initialize the CNN the same way as the gabornet.
+    if args.init_cnn_with_gabor:
+        assert cnn_padding == gabor_padding == False
+        gabor_weight = gabornet.g1.calculate_weights()
+        cnn.g1.weight.data = gabor_weight.clone().detach()
+        assert gabornet.g1.bias is None
+        assert cnn.g1.bias is None
+
     gabornet_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
     cnn_optimizer = OPT(cnn.parameters(), lr=LR, betas=BETAS)
 
