@@ -279,12 +279,13 @@ class GaborConv2d(_ConvNd):
         super(GaborConv2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
                                           _pair(0), groups, bias, padding_mode)
         self.freq = nn.Parameter(
-            (3.14 / 2) * 1.41 ** (-torch.randint(0, 5, (out_channels, in_channels))).type(torch.Tensor)).to(device)
-        self.theta = nn.Parameter((3.14 / 8) * torch.randint(0, 8, (out_channels, in_channels)).type(torch.Tensor)).to(device)
-        self.psi = nn.Parameter(3.14 * torch.rand(out_channels, in_channels)).to(device)
-        self.sigma = nn.Parameter(3.14 / self.freq).to(device)
-        self.x0 = torch.ceil(torch.Tensor([self.kernel_size[0] / 2]))[0].to(device)
-        self.y0 = torch.ceil(torch.Tensor([self.kernel_size[1] / 2]))[0].to(device)
+            (3.14 / 2) * 1.41 ** (-torch.randint(0, 5, (out_channels, in_channels))).type(torch.Tensor))
+        self.theta = nn.Parameter((3.14 / 8) * torch.randint(0, 8, (out_channels, in_channels)).type(torch.Tensor))
+        self.psi = nn.Parameter(3.14 * torch.rand(out_channels, in_channels))
+        self.sigma = nn.Parameter(3.14 / self.freq)
+        self.x0 = torch.ceil(torch.Tensor([self.kernel_size[0] / 2]))[0]
+        self.y0 = torch.ceil(torch.Tensor([self.kernel_size[1] / 2]))[0]
+
         self.device = device
 
     def forward(self, input_image):
