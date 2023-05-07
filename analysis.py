@@ -316,7 +316,7 @@ def visualize_features(model: torch.nn.Module, save_dir: str):
     visualize_tensor(weights, ch=0, allkernels=False, save_dir=save_dir)
 
 
-def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Module, device: torch.device):
+def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Module, device: torch.device, pbar: tqdm = None):
     """Tests the accuracy of a model."""
     
     model.eval()
@@ -330,6 +330,8 @@ def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Modu
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
             correct += (predicted == target).sum().item()
+            if pbar is not None:
+                pbar.update(1)
     
     return correct / total
 
