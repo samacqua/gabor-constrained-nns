@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from train import train_many
-from gabor_layer import GaborConv2d, GaborConv2dBuggy, GaborConv2dStillBuggy
+from gabor_layer import GaborConv2dPip, GaborConv2dGithub, GaborConv2dGithubUpdate
 from .dataset import DogsCatsDataset
 
 
@@ -34,7 +34,7 @@ class DogCatNNSanity(nn.Module):
     """
 
     def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu", bias: bool = True):
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2dPip, device="cpu", bias: bool = True):
         super(DogCatNNSanity, self).__init__()
 
         self.is_gabornet = is_gabornet
@@ -81,7 +81,7 @@ class DogCatNet(nn.Module):
     """
 
     def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2d, device="cpu", bias: bool = True):
+                 gabor_type: Type[nn.ModuleDict] = GaborConv2dPip, device="cpu", bias: bool = True):
         super(DogCatNet, self).__init__()
 
         self.is_gabornet = is_gabornet
@@ -189,7 +189,7 @@ def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = No
     """Loads a model from a file, with the optimizer and epoch."""
 
     # Load the model.
-    if model.is_gabornet and isinstance(model.g1, GaborConv2dBuggy):
+    if model.is_gabornet and isinstance(model.g1, GaborConv2dGithub):
         # Needed to avoid some memory issues.
         model.g1.x = Parameter(model.g1.x.contiguous())
         model.g1.y = Parameter(model.g1.y.contiguous())
@@ -228,22 +228,29 @@ def main():
 
     # Parse arguments.
     parser = argparse.ArgumentParser()
+
+    # Experiment params.
     parser.add_argument("--seed", type=int, default=None, help="Random seed.")
     parser.add_argument("--resume", action="store_true", help="Resume training from latest checkpoint.")
     parser.add_argument("--dir_name", type=str, default=None, 
                         help="Name of directory to save in. Defaults to seed_{random seed}.")
 
+    # Model params.
     parser.add_argument("--model", type=str, default="DogCatNet", choices=["DogCatNet", "DogCatNNSanity"])
     parser.add_argument("--gabor_kernel", type=int, default=15, help="Size of GaborNet kernel.")
     parser.add_argument("--cnn_kernel", type=int, default=5, help="Size of CNN kernel.")
-    parser.add_argument("--no_padding", action="store_true", help="Don't use padding to even the paramters.")
-    parser.add_argument("--gabor_type", type=str, default="GaborConv2d", help="Type of GaborNet to use.", 
-                        choices=["GaborConv2d", "GaborConv2dBuggy", "GaborConv2dStillBuggy"])
-    parser.add_argument("--freeze_cnn_first_layer", action="store_true", help="Freeze the first layer of the CNN.")
+    parser.add_argument("--padding", action="store_true", help="Use padding to even the paramters.")
+    parser.add_argument("--gabor_type", type=str, default="GaborConv2dPip", help="Type of GaborNet to use.", 
+                        choices=["GaborConv2dPip", "GaborConv2dGithub", "GaborConv2dGithubUpdate"])
+
+    # Training params.
     parser.add_argument("--init_cnn_with_gabor", action="store_true", help="Initialize CNN with GaborNet weights.")
+    parser.add_argument("--freeze_cnn", action="store_true", help="Freeze the first layer of the CNN.")
+    parser.add_argument("--freeze_gabor", action="store_true", help="Freeze the first layer of the GaborNet.")
+    parser.add_argument("--only_cnn", action="store_true", help="Flag to train only the CNN model.")
+    parser.add_argument("--only_gabor", action="store_true", help="Flag to train only the GaborNet model.")
 
-    parser.add_argument("--cnn_or_gabor", type=str, default=None, help="Which model to train.", choices=["cnn", "gabor"])
-
+    # Dataset params.
     parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
     parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
 
@@ -264,19 +271,20 @@ def main():
     net_arch = globals()[args.model]
     gabor_arch = globals()[args.gabor_type]
 
+    # Load the latest checkpoint.
     cnn_checkpoint, gabor_checkpoint = None, None
     if args.resume:
-        if args.cnn_or_gabor is None or args.cnn_or_gabor == 'cnn':
+        if not args.only_gabor:
             cnn_dir = os.path.join(save_dir, "models", "cnn")
             cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(cnn_dir)])
             cnn_checkpoint = torch.load(os.path.join(cnn_dir, f"epoch_{cnn_epoch}.pth"))
-        if args.cnn_or_gabor is None or args.cnn_or_gabor == 'gabor':
+        if not args.only_cnn:
             gabor_dir = os.path.join(save_dir, "models", "gabornet")
             gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(gabor_dir)])
             gabor_checkpoint = torch.load(os.path.join(gabor_dir, f"epoch_{gabor_epoch}.pth"))
 
-        if args.cnn_or_gabor is None:
-            assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs do not match."
+        if not args.only_gabor and not args.only_cnn:
+            assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs from filenames do not match."
 
     # Save the arguments.
     with open(os.path.join(save_dir, "args.json"), "w") as f:
@@ -295,8 +303,8 @@ def main():
 
     # Paper says they use 30% of the trainset as the validation set.
     # Just going to do that via code.
-    # N = 128
     N = int(len(train_set) * 0.7)
+    N = 128
     train_set, _ = torch.utils.data.random_split(
         train_set, [N, len(train_set) - N]
     )
@@ -305,7 +313,7 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Load the models + optimizers.
-    if net_arch == DogCatNet and not args.no_padding:
+    if args.padding:
         gabor_padding, cnn_padding = determine_padding(net_arch, args.gabor_kernel, args.cnn_kernel)
     else:
         gabor_padding, cnn_padding = False, False
@@ -314,29 +322,32 @@ def main():
     cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding, 
                    gabor_type=gabor_arch, bias=cnn_bias).to(device)
 
-    # Initialize the CNN the same way as the gabornet.
+    # Initialize the CNN with a Gabor function.
     if args.init_cnn_with_gabor:
         assert cnn_padding == gabor_padding == False
         gabor_weight = gabornet.g1.calculate_weights()
         cnn.g1.weight.data = gabor_weight.clone().detach()
-        assert gabornet.g1.bias is None
         assert cnn.g1.bias is None
 
     gabornet_optimizer = OPT(gabornet.parameters(), lr=LR, betas=BETAS)
     cnn_optimizer = OPT(cnn.parameters(), lr=LR, betas=BETAS)
 
+    # Load the model + optimizer checkpoints.
     starting_epoch = 0
     if gabor_checkpoint:
         gabornet, gabornet_optimizer, last_epoch = load_net(gabor_checkpoint, gabornet, gabornet_optimizer)
         starting_epoch = last_epoch + 1
     if cnn_checkpoint:
         cnn, cnn_optimizer, last_epoch = load_net(cnn_checkpoint, cnn, cnn_optimizer)
-        assert (starting_epoch == last_epoch + 1) or args.cnn_or_gabor == 'cnn', "CNN and GaborNet epochs do not match."
+        assert (starting_epoch == last_epoch + 1) or args.only_cnn, "CNN and GaborNet epochs do not match."
         starting_epoch = last_epoch + 1
 
-    # Freeze the CNN layer.
-    if args.freeze_cnn_first_layer:
+    # Freeze the first layer.
+    if args.freeze_cnn:
         for param in cnn.g1.parameters():
+            param.requires_grad = False
+    if args.freeze_gabor:
+        for param in gabornet.g1.parameters():
             param.requires_grad = False
 
     # Train the models.
@@ -349,8 +360,8 @@ def main():
     ]
 
     # Only train one model.
-    if args.cnn_or_gabor:
-        index = int(args.cnn_or_gabor == "cnn")
+    if args.only_cnn or args.only_gabor:
+        index = int(args.only_gabor)
 
         models = [models[index]]
         optimizers = [optimizers[index]]

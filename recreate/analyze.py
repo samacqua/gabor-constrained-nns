@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 
 from .dogs_cats import DogCatNNSanity, DogCatNet, load_dataset, load_net
 from analysis import test_accuracy
-from gabor_layer import GaborConv2d, GaborConv2dBuggy, GaborConv2dStillBuggy
+from gabor_layer import GaborConv2dPip, GaborConv2dGithub, GaborConv2dGithubUpdate
 
 
 def make_accuracy_fig(gabor_train: dict[int, float], cnn_train: dict[int, float], gabor_test: dict[int, float], 
@@ -364,6 +364,10 @@ def main():
                 for param in ['freq', 'theta', 'psi', 'sigma', 'weight', 'x0', 'y0']:
                     assert torch.allclose(getattr(gabor_models[first_epoch].g1, param), 
                                           getattr(gabor_models[epoch].g1, param))
+                    
+                    if hasattr(gabor_models[first_epoch].g1, 'conv_layer'):
+                        assert torch.allclose(gabor_models[first_epoch].g1.conv_layer.weight, 
+                                              gabor_models[epoch].g1.conv_layer.weight)
 
             if args.assert_cnn_frozen:
                 for param in ['weight', 'bias']:
