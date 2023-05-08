@@ -12,9 +12,8 @@ from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.utils import _pair
 
 
-class GaborConv2dStillBuggy(Module):
-    """Supposed to be a solution via https://github.com/iKintosh/GaborNet/compare/master...hotfix/learnable_parameters,
-    but it does not work."""
+class GaborConv2dGithubUpdate(Module):
+    """Github implementaton update via https://github.com/iKintosh/GaborNet/compare/master...hotfix/learnable_parameters."""
 
     def __init__(
         self,
@@ -109,10 +108,9 @@ class GaborConv2dStillBuggy(Module):
             if not self.is_calculated:
                 self.calculate_weights()
                 self.is_calculated = True
-        return self.conv_layer._conv_forward(input_tensor, self.weight, bias=None)
+        return self.conv_layer._conv_forward(input_tensor, nn.Parameter(self.weight), bias=None)
 
     def calculate_weights(self):
-        return self.conv_layer.weight
         self.weight = self._weight.data.detach().clone()
         for i in range(self.conv_layer.out_channels):
             for j in range(self.conv_layer.in_channels):
@@ -133,16 +131,9 @@ class GaborConv2dStillBuggy(Module):
 
         return self.weight
 
-    def _forward_unimplemented(self, *inputs: Any):
-        """
-        code checkers makes implement this method,
-        looks like error in PyTorch
-        """
-        raise NotImplementedError
 
-
-class GaborConv2dBuggy(Module):
-    """From the public github, but no gradient update."""
+class GaborConv2dGithub(Module):
+    """Implementation from the public github (https://github.com/iKintosh/GaborNet/blob/hotfix/learnable_parameters/GaborNet/GaborLayer.py)."""
 
     def __init__(
         self,
@@ -266,8 +257,8 @@ class GaborConv2dBuggy(Module):
         raise NotImplementedError
 
 
-class GaborConv2d(_ConvNd):
-    """From the package. Seems to work."""
+class GaborConv2dPip(_ConvNd):
+    """Implementation from the pip package (pip install gabornet)."""
 
     def __init__(self, in_channels, out_channels, kernel_size, device="cpu", stride=1,
                  padding=0, dilation=1, groups=1, bias=False, padding_mode='zeros'):
@@ -276,7 +267,7 @@ class GaborConv2d(_ConvNd):
         padding = _pair(padding)
         dilation = _pair(dilation)
 
-        super(GaborConv2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
+        super(GaborConv2dPip, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, False,
                                           _pair(0), groups, bias, padding_mode)
         self.freq = nn.Parameter(
             (3.14 / 2) * 1.41 ** (-torch.randint(0, 5, (out_channels, in_channels))).type(torch.Tensor))
