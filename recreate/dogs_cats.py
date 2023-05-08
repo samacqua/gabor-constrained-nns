@@ -249,6 +249,7 @@ def main():
     parser.add_argument("--freeze_gabor", action="store_true", help="Freeze the first layer of the GaborNet.")
     parser.add_argument("--only_cnn", action="store_true", help="Flag to train only the CNN model.")
     parser.add_argument("--only_gabor", action="store_true", help="Flag to train only the GaborNet model.")
+    parser.add_argument("--epochs", type=int, default=40, help="Number of epochs to train for.")
 
     # Dataset params.
     parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
@@ -293,7 +294,7 @@ def main():
     # Hyperparameters from paper.
     BATCH_SIZE = 64
     OPT = optim.AdamW
-    N_EPOCHS = 30
+    N_EPOCHS = args.epochs
     LR = 0.001
     BETAS = (0.9, 0.999)
 
