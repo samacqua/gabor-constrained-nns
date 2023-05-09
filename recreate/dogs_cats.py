@@ -48,12 +48,14 @@ class DogCatNNSanity(nn.Module):
         self.fc1 = nn.Linear(128 * 7 * 7, 128)
         self.fc3 = nn.Linear(128, 2)
 
+        self.dropout2d = nn.Dropout2d()
+
     def forward(self, x):
         x = F.max_pool2d(F.leaky_relu(self.g1(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
         x = F.max_pool2d(F.leaky_relu(self.c1(x)), kernel_size=2)
         x = F.max_pool2d(F.leaky_relu(self.c2(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
         x = x.view(-1, 128 * 7 * 7)
         x = F.leaky_relu(self.fc1(x))
         x = nn.Dropout()(x)
@@ -99,6 +101,9 @@ class DogCatNet(nn.Module):
         self.fc2 = nn.Linear(128, 128)
         self.fc3 = nn.Linear(128, 2)
 
+        self.dropout2d = nn.Dropout2d()
+        self.dropout = nn.Dropout()
+
         self.is_gabornet = is_gabornet
         self.add_padding = add_padding
 
@@ -109,36 +114,36 @@ class DogCatNet(nn.Module):
 
         # Should be (N, 32, 120, 120) according to paper.
         x1 = F.max_pool2d(F.relu(self.g1(x)), kernel_size=2)
-        x1 = nn.Dropout2d()(x1)
+        x1 = self.dropout2d(x1)
         # assert x1.shape == (N, 32, 120, 120)
 
         # Should be (N, 64, 59, 59) according to paper.
         x2 = F.max_pool2d(F.relu(self.c1(x1)), kernel_size=2)
-        x2 = nn.Dropout2d()(x2)
+        x2 = self.dropout2d(x2)
         # assert x2.shape == (N, 64, 59, 59)
 
         # Should be (N, 128, 28, 28) according to paper.
         x3 = F.max_pool2d(F.relu(self.c2(x2)), kernel_size=2)
-        x3 = nn.Dropout2d()(x3)
+        x3 = self.dropout2d(x3)
         # assert x3.shape == (N, 128, 28, 28)
 
         # Should be (N, 128, 13, 13) according to paper.
         x = F.max_pool2d(F.relu(self.c3(x3)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
         # assert x.shape == (N, 128, 13, 13)
 
         # Should be (N, 128, 5, 5) according to paper.
         x = F.max_pool2d(F.relu(self.c4(x)), kernel_size=2, padding=int(self.add_padding))
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
         self._x_size = x.shape
 
         x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
-        x = nn.Dropout()(x)
+        x = self.dropout(x)
         assert x.shape == (N, 128)
 
         x = F.relu(self.fc2(x))
-        x = nn.Dropout()(x)
+        x = self.dropout(x)
         assert x.shape == (N, 128)
 
         x = self.fc3(x)
