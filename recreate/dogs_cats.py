@@ -362,7 +362,7 @@ def main():
 
     # Only train one model.
     if args.only_cnn or args.only_gabor:
-        index = int(args.only_gabor)
+        index = int(args.only_cnn)
 
         models = [models[index]]
         optimizers = [optimizers[index]]
