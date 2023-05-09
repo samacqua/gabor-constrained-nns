@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from gabor_layer import GaborConv2d
+from gabor_layer import GaborConv2dPip
 
 N_CHANNELS_OUT = 8
 
@@ -70,7 +70,7 @@ class CNN(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu'):
         super().__init__()
         n_classes = 10
-        conv1_type = GaborConv2d if is_gabornet else nn.Conv2d
+        conv1_type = GaborConv2dPip if is_gabornet else nn.Conv2d
         self.conv1 = conv1_type(n_channels, N_CHANNELS_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
 
         self.c1 = nn.Conv2d(N_CHANNELS_OUT, N_CHANNELS_OUT*2, kernel_size=(3, 3), stride=1)
@@ -113,7 +113,7 @@ class CNNSmall(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu'):
         super().__init__()
         n_classes = 10
-        conv1_type = GaborConv2d if is_gabornet else nn.Conv2d
+        conv1_type = GaborConv2dPip if is_gabornet else nn.Conv2d
         self.conv1 = conv1_type(n_channels, N_CHANNELS_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
 
         self.c1 = nn.Conv2d(N_CHANNELS_OUT, N_CHANNELS_OUT*2, kernel_size=(3, 3), stride=2)
@@ -148,7 +148,7 @@ class CNNLinear(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu'):
         super().__init__()
         n_classes = 10
-        conv1_type = GaborConv2d if is_gabornet else nn.Conv2d
+        conv1_type = GaborConv2dPip if is_gabornet else nn.Conv2d
 
         self.conv1 = conv1_type(n_channels, N_CHANNELS_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
         
