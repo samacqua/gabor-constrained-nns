@@ -276,14 +276,21 @@ def main():
     cnn_checkpoint, gabor_checkpoint = None, None
     if args.resume:
         if not args.only_gabor:
-            cnn_dir = os.path.join(save_dir, "models", "cnn")
-            cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(cnn_dir)])
-            cnn_checkpoint = torch.load(os.path.join(cnn_dir, f"epoch_{cnn_epoch}.pth"))
+            try:
+                cnn_dir = os.path.join(save_dir, "models", "cnn")
+                cnn_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(cnn_dir)])
+                cnn_checkpoint = torch.load(os.path.join(cnn_dir, f"epoch_{cnn_epoch}.pth"))
+            except FileNotFoundError:
+                cnn_checkpoint = None
+                cnn_epoch = 0
         if not args.only_cnn:
-            gabor_dir = os.path.join(save_dir, "models", "gabornet")
-            gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(gabor_dir)])
-            gabor_checkpoint = torch.load(os.path.join(gabor_dir, f"epoch_{gabor_epoch}.pth"))
-
+            try:
+                gabor_dir = os.path.join(save_dir, "models", "gabornet")
+                gabor_epoch = max([int(fname.split("epoch_")[1].split(".pth")[0]) for fname in os.listdir(gabor_dir)])
+                gabor_checkpoint = torch.load(os.path.join(gabor_dir, f"epoch_{gabor_epoch}.pth"))
+            except FileNotFoundError:
+                gabor_checkpoint = None
+                gabor_epoch = 0
         if not args.only_gabor and not args.only_cnn:
             assert cnn_epoch == gabor_epoch, "CNN and GaborNet epochs from filenames do not match."
 
