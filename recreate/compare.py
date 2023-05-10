@@ -127,7 +127,7 @@ def main():
     train_set, _ = torch.utils.data.random_split(train_set, [N_train, len(train_set) - N_train])
     val_set, _ = torch.utils.data.random_split(test_set1, [N_val, len(test_set1) - N_val])
     test_set, _ = torch.utils.data.random_split(test_set, [N_test, len(test_set) - N_test])
-    test_set = val_set      # Pretty sure the original papers "test set" is actually a validation set.
+    # test_set = val_set      # Pretty sure the original papers "test set" is actually a validation set.
 
     batch_size = 64
     train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=0)
