@@ -91,6 +91,7 @@ def main():
                 model_dirs.setdefault(model_name, {})[int(seed_str)] = dir
 
     # Ensure that models are comparable + set dataset path.
+    _, _, n_classes = load_dataset(dataset, dataset_dir=dataset_dir, img_size=img_size, n_channels=n_channels)
     img_size, n_channels, dataset, base_model = None, None, None, None
     dataset_dir = args.dataset_dir
     for model_name, model_dir_by_seed in model_dirs.items():
@@ -125,7 +126,7 @@ def main():
         for seed, model_dir in model_dir_by_seed.items():
             accuracy_dir = get_acc_path(model_dir)
             models_by_seed.setdefault(seed, {})[model_name] = {
-                "checkpoints": load_models(base_model, epochs, model_dir, device),
+                "checkpoints": load_models(base_model, epochs, model_dir, device, n_classes=n_classes),
                 "save_dir": accuracy_dir
                 }
 
@@ -136,7 +137,7 @@ def main():
         # Load the testset.
         print(f"Loading dataset with seed={seed}...")
         torch.manual_seed(seed)
-        train_set, test_set = load_dataset(dataset, dataset_dir=dataset_dir, img_size=img_size, n_channels=n_channels)
+        train_set, test_set, n_classes = load_dataset(dataset, dataset_dir=dataset_dir, img_size=img_size, n_channels=n_channels)
 
         # Split the trainset into train and test.
         train_set, test_set1 = torch.utils.data.random_split(

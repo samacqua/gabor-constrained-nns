@@ -35,13 +35,22 @@ def load_dataset(dataset_name: str, img_size: tuple[int, int], n_channels: int, 
 
     # Maps the dataset name to the loader of that dataset.
     datasets = {
-        "cifar10": lambda train: torchvision.datasets.CIFAR10(
+        "cifar10": {
+            "loader": lambda train: torchvision.datasets.CIFAR10(
             root=dataset_dir, train=train, download=True, transform=transforms.Compose(cifar_transforms)),
-        "fashion-mnist": lambda train: torchvision.datasets.FashionMNIST(
+            "n_classes": 10
+        },
+        "fashion-mnist": {
+            "loader": lambda train: torchvision.datasets.FashionMNIST(
             root=dataset_dir, train=train, download=True, transform=transforms.Compose(fashion_mnist_transforms)),
-        "dogs-vs-cats": lambda train: DogsCatsDataset(
+            "n_classes": 10
+        },
+        "dogs-vs-cats": {
+            "loader": lambda train: DogsCatsDataset(
             root_dir=os.path.join(dataset_dir, "train" if train else "test1"), 
-            transform=transforms.Compose(cats_dogs_transforms))
+            transform=transforms.Compose(cats_dogs_transforms)),
+            "n_classes": 2
+        }
     }
 
     # Load the dataset.
@@ -49,7 +58,7 @@ def load_dataset(dataset_name: str, img_size: tuple[int, int], n_channels: int, 
         raise ValueError(f"Dataset {dataset_name} not supported. Supported datasets: {list(datasets.keys())}")
 
     dataset = datasets[dataset_name]
-    trainset = dataset(train=True)
-    testset = dataset(train=False)
+    trainset = dataset['loader'](train=True)
+    testset = dataset['loader'](train=False)
     
-    return trainset, testset
+    return trainset, testset, dataset['n_classes']

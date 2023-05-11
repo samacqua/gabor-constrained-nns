@@ -191,7 +191,7 @@ def update_checkpoint(checkpoint: dict, gabor_type: str | None, kernel_size: int
 
 
 def load_models(base_model: GaborBase, epochs_to_load: set[int] | None, models_dir: str, 
-                device: torch.device):
+                device: torch.device, n_classes: int):
     """Loads the model checkpoints from the directory.
     
     Args:
@@ -224,7 +224,7 @@ def load_models(base_model: GaborBase, epochs_to_load: set[int] | None, models_d
         gabor_type = globals()[gabor_type_str] if is_gabornet else None
 
         model = base_model(is_gabornet=is_gabornet, kernel_size=kernel_size, add_padding=add_padding, 
-                        gabor_type=gabor_type, device=device)
+                        gabor_type=gabor_type, device=device, n_classes=n_classes)
         model, _, model_epoch = load_net(checkpoint, model, strict=True)
 
         assert epoch == model_epoch
@@ -234,12 +234,12 @@ def load_models(base_model: GaborBase, epochs_to_load: set[int] | None, models_d
 
 
 def load_cnn_gabor_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_load: set[int] = None,
-                gabor_models_dir: str = None, cnn_models_dir: str = None, device: str = 'cpu',
+                gabor_models_dir: str = None, cnn_models_dir: str = None, device: str = 'cpu', n_classes: int = 2,
                 ) -> tuple[dict[int, torch.nn.Module], dict[int, torch.nn.Module]]:
     """Loads the Gabor + CNN models."""
 
-    gabor_models = load_models(base_model, epochs_to_load, os.path.join(gabor_models_dir, "gabornet"), device)
-    cnn_models = load_models(base_model, epochs_to_load, os.path.join(cnn_models_dir, "cnn"), device)
+    gabor_models = load_models(base_model, epochs_to_load, os.path.join(gabor_models_dir, "gabornet"), device, n_classes=n_classes)
+    cnn_models = load_models(base_model, epochs_to_load, os.path.join(cnn_models_dir, "cnn"), device, n_classes=n_classes)
     
     assert len(gabor_models) == len(cnn_models)
 
@@ -300,7 +300,7 @@ def main():
     # Load the testset.
     print("Loading dataset...")
     torch.manual_seed(args.seed)
-    train_set, test_set = load_dataset(args.dataset, args.dataset_dir or train_args['dataset_dir'], 
+    train_set, test_set, n_classes = load_dataset(args.dataset, args.dataset_dir or train_args['dataset_dir'], 
                                        img_size=(train_args['img_size'], train_args['img_size']), n_channels=train_args['n_channels'])
 
     # Split the trainset into train and test.
@@ -331,7 +331,7 @@ def main():
     cnn_models_dir = os.path.join(cnn_dir, "models")
     gabor_models, cnn_models = load_cnn_gabor_models(base_model, epochs_to_load=epochs, 
                                            gabor_models_dir=gabor_models_dir, cnn_models_dir=cnn_models_dir, 
-                                           device=device)
+                                           device=device, n_classes=n_classes)
 
     # Show the accuracies.
     if args.assert_gabor_frozen or args.assert_cnn_frozen:

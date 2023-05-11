@@ -201,7 +201,7 @@ def main(args):
 
     # Load the dataset.
     torch.manual_seed(rand_seed)
-    train_set, test_set = load_dataset(args.dataset, dataset_dir=args.dataset_dir, img_size=args.img_size, 
+    train_set, test_set, n_classes = load_dataset(args.dataset, dataset_dir=args.dataset_dir, img_size=args.img_size, 
                                        n_channels=args.n_channels)
 
     # Paper says they use 30% of the trainset as the validation set.
@@ -221,9 +221,9 @@ def main(args):
     else:
         gabor_padding, cnn_padding = False, False
     gabornet = net_arch(is_gabornet=True, kernel_size=args.gabor_kernel, add_padding=gabor_padding, 
-                        gabor_type=gabor_arch, device=device).to(device)
+                        gabor_type=gabor_arch, device=device, n_classes=n_classes).to(device)
     cnn = net_arch(is_gabornet=False, kernel_size=args.cnn_kernel, add_padding=cnn_padding, 
-                   gabor_type=gabor_arch, bias=cnn_bias).to(device)
+                   gabor_type=gabor_arch, bias=cnn_bias, n_classes=n_classes).to(device)
 
     # Initialize the CNN with a Gabor function.
     if args.init_cnn_with_gabor:
