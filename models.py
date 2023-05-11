@@ -80,6 +80,9 @@ class CNN(GaborBase):
         self.fc1 = nn.LazyLinear(128)
         self.fc2 = nn.Linear(128, n_classes)
 
+        self.dropout2d = nn.Dropout2d()
+        self.dropout = nn.Dropout()
+
         self.is_gabornet = is_gabornet
         self.n_channels = n_channels
         self.kernel_size = kernel_size
@@ -87,20 +90,20 @@ class CNN(GaborBase):
     def forward(self, x):
 
         x = F.max_pool2d(F.leaky_relu(self.conv1(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
 
         x = F.max_pool2d(F.leaky_relu(self.c1(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
 
         x = F.max_pool2d(F.leaky_relu(self.c2(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
 
         x = F.max_pool2d(F.leaky_relu(self.c3(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
 
         x = torch.flatten(x, 1)
         x = F.leaky_relu(self.fc1(x))
-        x = nn.Dropout()(x)
+        x = self.dropout(x)
 
         x = self.fc2(x)
 
@@ -121,6 +124,9 @@ class CNNSmall(GaborBase):
         self.fc1 = nn.LazyLinear(64)
         self.fc2 = nn.Linear(64, n_classes)
 
+        self.dropout2d = nn.Dropout2d()
+        self.dropout = nn.Dropout()
+
         self.is_gabornet = is_gabornet
         self.n_channels = n_channels
         self.kernel_size = kernel_size
@@ -128,14 +134,14 @@ class CNNSmall(GaborBase):
     def forward(self, x):
 
         x = F.max_pool2d(F.leaky_relu(self.conv1(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
         
         x = F.max_pool2d(F.leaky_relu(self.c1(x)), kernel_size=2)
-        x = nn.Dropout2d()(x)
+        x = self.dropout2d(x)
         
         x = torch.flatten(x, 1)
         x = F.leaky_relu(self.fc1(x))
-        x = nn.Dropout()(x)
+        x = self.dropout(x)
         
         x = self.fc2(x)
         
@@ -153,6 +159,7 @@ class CNNLinear(GaborBase):
         self.conv1 = conv1_type(n_channels, N_CHANNELS_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
         
         self.fc1 = nn.LazyLinear(n_classes)
+        self.dropout = nn.Dropout()
 
         self.is_gabornet = is_gabornet
         self.n_channels = n_channels
@@ -161,7 +168,7 @@ class CNNLinear(GaborBase):
     def forward(self, x):
 
         x = F.max_pool2d(F.relu(self.conv1(x)), kernel_size=2)
-        x = nn.Dropout()(x)
+        x = self.dropout(x)
 
         x = torch.flatten(x, 1)
         x = self.fc1(x)
