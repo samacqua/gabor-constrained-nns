@@ -42,15 +42,15 @@ class GaborBase(nn.Module):
     """Base class that allows switching between CNN and GaborNet."""
 
     def __init__(self, is_gabornet: bool = False, gabor_type = GaborConv2dPip, n_channels: int = 3, 
-                 kernel_size: int = 5, bias: bool = False, device="cpu"):
+                 kernel_size: int = 5, bias: bool = False, device="cpu", n_channels_out: int = N_CHANNELS_OUT):
         super().__init__()
 
         self.is_gabornet = is_gabornet
 
         if is_gabornet:
-            self.g1 = gabor_type(n_channels, N_CHANNELS_OUT, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
+            self.g1 = gabor_type(n_channels, n_channels_out, kernel_size=(kernel_size, kernel_size), stride=1, device=device)
         else:
-            self.g1 = nn.Conv2d(n_channels, N_CHANNELS_OUT, kernel_size=(kernel_size, kernel_size), stride=1, bias=bias)
+            self.g1 = nn.Conv2d(n_channels, n_channels_out, kernel_size=(kernel_size, kernel_size), stride=1, bias=bias)
 
 
     def unconstrain(self):
@@ -108,7 +108,7 @@ class CNN(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu',
                  add_padding: bool = False, gabor_type = GaborConv2dPip, bias=False, n_classes: int = 10):
         super().__init__(is_gabornet=is_gabornet, gabor_type=gabor_type, n_channels=n_channels, kernel_size=kernel_size,
-                        bias=bias, device=device)
+                        bias=bias, device=device, n_channels_out=N_CHANNELS_OUT)
 
         self.c1 = nn.Conv2d(N_CHANNELS_OUT, N_CHANNELS_OUT*2, kernel_size=(3, 3), stride=1)
         self.c2 = nn.Conv2d(N_CHANNELS_OUT*2, N_CHANNELS_OUT*4, kernel_size=(3, 3), stride=1)
@@ -150,7 +150,7 @@ class CNNSmall(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu',
                  add_padding: bool = False, gabor_type = GaborConv2dPip, bias=False, n_classes: int = 10):
         super().__init__(is_gabornet=is_gabornet, gabor_type=gabor_type, n_channels=n_channels, kernel_size=kernel_size,
-                        bias=bias, device=device)
+                        bias=bias, device=device, n_channels_out=N_CHANNELS_OUT)
 
         self.fc1 = nn.LazyLinear(64)
         self.fc2 = nn.Linear(64, n_classes)
@@ -181,7 +181,7 @@ class CNNLinear(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu',
                  add_padding: bool = False, gabor_type = GaborConv2dPip, bias=False, n_classes: int = 10):
         super().__init__(is_gabornet=is_gabornet, gabor_type=gabor_type, n_channels=n_channels, kernel_size=kernel_size,
-                        bias=bias, device=device)
+                        bias=bias, device=device, n_channels_out=N_CHANNELS_OUT)
         
         self.fc1 = nn.LazyLinear(n_classes)
         self.dropout = nn.Dropout()

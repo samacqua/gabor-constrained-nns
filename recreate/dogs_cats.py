@@ -51,7 +51,7 @@ class DogCatNet(GaborBase):
     def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu',
                  add_padding: bool = False, gabor_type = GaborConv2dPip, bias=False, n_classes: int = 10):
         super().__init__(is_gabornet=is_gabornet, gabor_type=gabor_type, n_channels=n_channels, kernel_size=kernel_size,
-                        bias=bias, device=device)
+                        bias=bias, device=device, n_channels_out=32)
 
         self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1)
         self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=1)
