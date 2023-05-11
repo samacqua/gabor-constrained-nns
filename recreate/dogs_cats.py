@@ -194,7 +194,7 @@ def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = No
     """Loads a model from a file, with the optimizer and epoch."""
 
     # Load the model.
-    if model.is_gabornet and isinstance(model.g1, GaborConv2dGithub):
+    if model.is_gabornet and isinstance(model.g1, (GaborConv2dGithub, GaborConv2dGithubUpdate)):
         # Needed to avoid some memory issues.
         model.g1.x = Parameter(model.g1.x.contiguous())
         model.g1.y = Parameter(model.g1.y.contiguous())
