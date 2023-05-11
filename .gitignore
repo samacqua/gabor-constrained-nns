@@ -137,3 +137,5 @@ experiments/tmp.yaml
 
 .DS_Store
 recreate/out/*
+recreate/a.py
+recreate/compare.json
