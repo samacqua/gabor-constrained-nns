@@ -207,7 +207,7 @@ def main(args):
     # Paper says they use 30% of the trainset as the validation set.
     # Just going to do that via code.
     N = int(len(train_set) * 0.7)
-    N = 128
+    # N = 128
     train_set, _ = torch.utils.data.random_split(
         train_set, [N, len(train_set) - N]
     )
