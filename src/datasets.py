@@ -6,10 +6,11 @@ import os
 from recreate.dataset import DogsCatsDataset
 
 
-def load_dataset(dataset_name: str, img_size: tuple[int, int], n_channels: int, dataset_dir: str = "./data"
+def load_dataset(dataset_name: str, img_size: int | tuple[int], n_channels: int, dataset_dir: str = "./data"
                  ) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """Loads a train + test dataset."""
 
+    img_size = (img_size, img_size) if isinstance(img_size, int) else img_size
     assert n_channels in (1, 3), f"n_channels must be 1 or 3, not {n_channels}"
 
     # Make the transforms based on the number of channels.
@@ -17,12 +18,12 @@ def load_dataset(dataset_name: str, img_size: tuple[int, int], n_channels: int, 
     # If 3 channels, then just copying Fashion-MNIST across all channels.
     # If 1 channel, then converting CIFAR-10 to grayscale.
     cifar_transforms = ([torchvision.transforms.Grayscale(num_output_channels=1)] if n_channels == 1 else []) + [
-        torchvision.transforms.Resize((img_size, img_size)),
+        torchvision.transforms.Resize(img_size),
         transforms.ToTensor(),
         transforms.Normalize((0.5,) * n_channels, (0.5,) * n_channels)
     ]
     fashion_mnist_transforms = ([torchvision.transforms.Grayscale(num_output_channels=3)] if n_channels == 3 else []) + [
-        torchvision.transforms.Resize((img_size, img_size)),
+        torchvision.transforms.Resize(img_size),
         transforms.ToTensor(),
         transforms.Normalize((0.5,) * n_channels, (0.5,) * n_channels)
     ]
