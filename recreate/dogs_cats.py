@@ -24,46 +24,12 @@ from torchvision import transforms
 from train import train_many
 from gabor_layer import GaborConv2dPip, GaborConv2dGithub, GaborConv2dGithubUpdate
 from .dataset import DogsCatsDataset
+from src.datasets import load_dataset
+
+from src.models import CNNLinear, CNNSmall, CNN, GaborBase, load_net
 
 
-class DogCatNNSanity(nn.Module):
-    """From https://github.com/iKintosh/GaborNet/blob/master/sanity_check/run_sanity_check.py.
-    
-    This is not the network used in the original paper, but the authors do not have a public implementation of their
-    tests, so this serves as a good starting point of something the authors have implemented.
-    """
-
-    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = True, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2dPip, device="cpu", bias: bool = True):
-        super(DogCatNNSanity, self).__init__()
-
-        self.is_gabornet = is_gabornet
-        if is_gabornet:
-            self.g1 = gabor_type(3, 32, kernel_size=kernel_size, stride=1, device=device)
-        else:
-            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1, bias=bias)
-
-        self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=2)
-        self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=2)
-        self.fc1 = nn.Linear(128 * 7 * 7, 128)
-        self.fc3 = nn.Linear(128, 2)
-
-        self.dropout2d = nn.Dropout2d()
-
-    def forward(self, x):
-        x = F.max_pool2d(F.leaky_relu(self.g1(x)), kernel_size=2)
-        x = self.dropout2d(x)
-        x = F.max_pool2d(F.leaky_relu(self.c1(x)), kernel_size=2)
-        x = F.max_pool2d(F.leaky_relu(self.c2(x)), kernel_size=2)
-        x = self.dropout2d(x)
-        x = x.view(-1, 128 * 7 * 7)
-        x = F.leaky_relu(self.fc1(x))
-        x = nn.Dropout()(x)
-        x = self.fc3(x)
-        return x
-
-
-class DogCatNet(nn.Module):
+class DogCatNet(GaborBase):
     """Based on figure in original paper.
     
     The original paper says that Dropout is applied, but it is not clear where; we assume that Dropout is applied after
@@ -82,15 +48,10 @@ class DogCatNet(nn.Module):
     parameter counts are equal after the original layer. 
     """
 
-    def __init__(self, is_gabornet: bool = False, kernel_size: tuple[int, int] = (15, 15), add_padding: bool = False, 
-                 gabor_type: Type[nn.ModuleDict] = GaborConv2dPip, device="cpu", bias: bool = True):
-        super(DogCatNet, self).__init__()
-
-        self.is_gabornet = is_gabornet
-        if is_gabornet:
-            self.g1 = gabor_type(in_channels=3, out_channels=32, kernel_size=kernel_size, stride=1, device=device)
-        else:
-            self.g1 = nn.Conv2d(3, 32, kernel_size=kernel_size, stride=1, bias=bias)
+    def __init__(self, is_gabornet: bool = False, n_channels: int = 3, kernel_size: int = 10, device = 'cpu',
+                 add_padding: bool = False, gabor_type = GaborConv2dPip, bias=False, n_classes: int = 10):
+        super().__init__(is_gabornet=is_gabornet, gabor_type=gabor_type, n_channels=n_channels, kernel_size=kernel_size,
+                        bias=bias, device=device)
 
         self.c1 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1)
         self.c2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=1)
@@ -99,12 +60,11 @@ class DogCatNet(nn.Module):
 
         self.fc1 = nn.LazyLinear(128)
         self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, 2)
+        self.fc3 = nn.Linear(128, n_classes)
 
         self.dropout2d = nn.Dropout2d()
         self.dropout = nn.Dropout()
 
-        self.is_gabornet = is_gabornet
         self.add_padding = add_padding
 
     def forward(self, x):
@@ -189,46 +149,6 @@ def determine_padding(model_arch: Type[torch.nn.Module], gabor_kernel: tuple[int
     return gabor_padding, cnn_padding
 
 
-def load_net(checkpoint, model: torch.nn.Module, optimizer: optim.Optimizer = None, strict: bool = True
-             ) -> tuple[nn.Module, optim.Optimizer, int]:
-    """Loads a model from a file, with the optimizer and epoch."""
-
-    # Load the model.
-    if model.is_gabornet and isinstance(model.g1, (GaborConv2dGithub, GaborConv2dGithubUpdate)):
-        # Needed to avoid some memory issues.
-        model.g1.x = Parameter(model.g1.x.contiguous())
-        model.g1.y = Parameter(model.g1.y.contiguous())
-        model.g1.x_grid = Parameter(model.g1.x_grid.contiguous())
-        model.g1.y_grid = Parameter(model.g1.y_grid.contiguous())
-
-    model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
-
-    # Load the optimizer.
-    if optimizer:
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-    return model, optimizer, checkpoint["epoch"]
-
-
-def load_dataset(dataset_dir: str = "data/dogs-vs-cats/", img_size: tuple[int, int] = (256, 256)):
-    """Loads the cats v. dogs dataset."""
-
-    # Noramlize the data.
-    transform = transforms.Compose(
-        [
-            transforms.ToPILImage(),
-            transforms.Resize(img_size),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]
-    )
-
-    train_set = DogsCatsDataset(root_dir=os.path.join(dataset_dir, "train"), transform=transform)
-    test_set = DogsCatsDataset(root_dir=os.path.join(dataset_dir, "test1"), transform=transform)
-
-    return train_set, test_set
-
-
 def main(args):
 
     # If initializing the CNN with the GaborNet weights, the CNN should not have a bias.
@@ -281,12 +201,13 @@ def main(args):
 
     # Load the dataset.
     torch.manual_seed(rand_seed)
-    train_set, test_set = load_dataset(args.dataset_dir, (args.img_size, args.img_size))
+    train_set, test_set = load_dataset(args.dataset, dataset_dir=args.dataset_dir, img_size=args.img_size, 
+                                       n_channels=args.n_channels)
 
     # Paper says they use 30% of the trainset as the validation set.
     # Just going to do that via code.
     N = int(len(train_set) * 0.7)
-    # N = 128
+    N = 128
     train_set, _ = torch.utils.data.random_split(
         train_set, [N, len(train_set) - N]
     )
@@ -354,8 +275,9 @@ def main(args):
                dataloader=train, save_dir=save_dir, device=device, starting_epoch=starting_epoch, n_epochs=N_EPOCHS)
 
 
-if __name__ == "__main__":
-
+def make_parser():
+    """Makes the command-line arguments parser."""
+    
     # Parse arguments.
     parser = argparse.ArgumentParser()
 
@@ -366,7 +288,8 @@ if __name__ == "__main__":
                         help="Name of directory to save in. Defaults to seed_{random seed}.")
 
     # Model params.
-    parser.add_argument("--model", type=str, default="DogCatNet", choices=["DogCatNet", "DogCatNNSanity"])
+    parser.add_argument("--model", type=str, default="DogCatNet", 
+                        choices=["DogCatNet", "CNNLinear", "CNNSmall", "CNN"])
     parser.add_argument("--gabor_kernel", type=int, default=15, help="Size of GaborNet kernel.")
     parser.add_argument("--cnn_kernel", type=int, default=5, help="Size of CNN kernel.")
     parser.add_argument("--padding", action="store_true", help="Use padding to even the paramters.")
@@ -382,9 +305,15 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs to train for.")
 
     # Dataset params.
+    parser.add_argument("--dataset", type=str, default="dogs-vs-cats", choices=["dogs-vs-cats", "cifar10", "fashion-mnist"])
     parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
     parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
+    parser.add_argument("--n_channels", type=int, default=3, help="Number of channels in the images.")
 
-    args = parser.parse_args()
+    return parser
 
+
+if __name__ == "__main__":
+
+    args = make_parser().parse_args()
     main(args)

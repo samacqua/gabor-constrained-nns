@@ -9,7 +9,7 @@ import sys
 import torchvision
 import torchvision.transforms as transforms
 
-from models import CNN, CNNSmall, CNNLinear
+from src.models import CNN, CNNSmall, CNNLinear
 
 
 def parse_config(config_path: str):

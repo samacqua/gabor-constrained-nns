@@ -312,7 +312,7 @@ def visualize_features(model: torch.nn.Module, save_dir: str):
     """Visualizes the features of a model."""
 
     # Get the weights of the first layer.
-    weights = model.conv1.weight.data.cpu()
+    weights = model.g1.weight.data.cpu()
     visualize_tensor(weights, ch=0, allkernels=False, save_dir=save_dir)
 
 

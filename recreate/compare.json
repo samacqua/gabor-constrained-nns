@@ -1,4 +1,12 @@
 {
-    "og_gabornet": "recreate/out/seed_524/models/gabornet/", 
-    "og_cnn": "recreate/out/seed_524/models/cnn/"
+    "gabor": {
+        "0": "recreate/out/test/0/models/gabornet/",
+        "1": "recreate/out/test/1/models/gabornet/",
+        "2": "recreate/out/test/2/models/gabornet/"
+    },
+    "cnn": {
+        "0": "recreate/out/test/0/models/cnn/",
+        "1": "recreate/out/test/1/models/cnn/",
+        "2": "recreate/out/test/2/models/cnn/"
+    }
 }

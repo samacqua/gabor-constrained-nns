@@ -5,14 +5,19 @@ from typing import Any
 
 import torch
 from torch.nn import Parameter
-from torch.nn.modules import Conv2d, Module
+from torch.nn.modules import Conv2d
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.utils import _pair
 
 
-class GaborConv2dGithubUpdate(Module):
+class GaborLayer(nn.Module):
+    """The Gabor-constrained layer."""
+    pass
+
+
+class GaborConv2dGithubUpdate(GaborLayer):
     """Github implementaton update via https://github.com/iKintosh/GaborNet/compare/master...hotfix/learnable_parameters."""
 
     def __init__(
@@ -132,7 +137,7 @@ class GaborConv2dGithubUpdate(Module):
         return self.weight
 
 
-class GaborConv2dGithub(Module):
+class GaborConv2dGithub(GaborLayer):
     """Implementation from the public github (https://github.com/iKintosh/GaborNet/blob/hotfix/learnable_parameters/GaborNet/GaborLayer.py)."""
 
     def __init__(
@@ -257,7 +262,7 @@ class GaborConv2dGithub(Module):
         raise NotImplementedError
 
 
-class GaborConv2dPip(_ConvNd):
+class GaborConv2dPip(_ConvNd, GaborLayer):
     """Implementation from the pip package (pip install gabornet)."""
 
     def __init__(self, in_channels, out_channels, kernel_size, device="cpu", stride=1,
@@ -278,10 +283,9 @@ class GaborConv2dPip(_ConvNd):
         self.y0 = torch.ceil(torch.Tensor([self.kernel_size[1] / 2]))[0]
 
         self.device = device
-        self.calc_weights = True    # TODO: re-run buggy experiments so this isn't necessary.
 
     def forward(self, input_image):
-        weight = self.calculate_weights() if self.calc_weights else self.weight.data
+        weight = self.calculate_weights()
         return F.conv2d(input_image, weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
     def calculate_weights(self):

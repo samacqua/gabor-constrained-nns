@@ -12,9 +12,11 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 
-from .dogs_cats import DogCatNNSanity, DogCatNet, load_dataset, load_net
+from .dogs_cats import DogCatNet
 from analysis import test_accuracy
 from gabor_layer import GaborConv2dPip, GaborConv2dGithub, GaborConv2dGithubUpdate
+from src.datasets import load_dataset
+from src.models import load_net, GaborBase
 
 
 def make_accuracy_fig(gabor_train: dict[int, float], cnn_train: dict[int, float], gabor_test: dict[int, float], 
@@ -174,7 +176,6 @@ def calc_accuracies_cnn_gabor(gabor_models: dict[int, torch.nn.Module], cnn_mode
     return gabor_train, cnn_train, gabor_test, cnn_test
 
 
-
 def update_checkpoint(checkpoint: dict, gabor_type: str | None, kernel_size: int, add_padding: bool, save_path: str
                       ) -> dict:
     """Updates the checkpoint to include the gabor type, kernel size, and padding. Used to update old checkpoints."""
@@ -189,8 +190,8 @@ def update_checkpoint(checkpoint: dict, gabor_type: str | None, kernel_size: int
     return checkpoint
 
 
-def load_models(base_model: Type[torch.nn.Module], epochs_to_load: set[int] | None, models_dir: str, 
-                device: torch.device, calc_weights: bool, train_args: dict = None):
+def load_models(base_model: GaborBase, epochs_to_load: set[int] | None, models_dir: str, 
+                device: torch.device):
     """Loads the model checkpoints from the directory.
     
     Args:
@@ -198,9 +199,6 @@ def load_models(base_model: Type[torch.nn.Module], epochs_to_load: set[int] | No
         epochs_to_load: The epochs to load. If None, loads all epochs.
         models_dir: The directory to load the models from.
         device: The device to load the models on.
-        calc_weights: Whether to calculate the weights for the model.
-        train_args: The arguments passed to the training script. Used to update the model checkpoint if it does not
-            contain the necessary information. TODO: deprecate once all are updated.
 
     Returns:
         {epoch: model}
@@ -217,22 +215,6 @@ def load_models(base_model: Type[torch.nn.Module], epochs_to_load: set[int] | No
         checkpoint_path = os.path.join(models_dir, fname)
         checkpoint = torch.load(checkpoint_path, map_location=device)
 
-        # Update the checkpoint if necessary.
-        if "gabor_type" not in checkpoint or "kernel_size" not in checkpoint or "add_padding" not in checkpoint:
-            assert train_args['no_padding']
-
-            is_gabornet = "gabornet" in models_dir
-            kernel_size = train_args['gabor_kernel'] if is_gabornet else train_args['cnn_kernel']
-            gabor_type = train_args['gabor_type'] if is_gabornet else None
-            add_padding = False
-            
-            c = input(f"updating checkpoint {checkpoint_path} with gabor type {gabor_type}, kernel size {kernel_size}, "
-                      f" and add padding {add_padding}. Continue? (y/n)")
-            if c == "y":
-                checkpoint = update_checkpoint(checkpoint, gabor_type, kernel_size, add_padding, checkpoint_path)
-            else:
-                sys.exit(0)
-
         # Load the model.
         gabor_type_str = checkpoint["gabor_type"]
         kernel_size = checkpoint["kernel_size"]
@@ -243,10 +225,7 @@ def load_models(base_model: Type[torch.nn.Module], epochs_to_load: set[int] | No
 
         model = base_model(is_gabornet=is_gabornet, kernel_size=kernel_size, add_padding=add_padding, 
                         gabor_type=gabor_type, device=device)
-        model, _, model_epoch = load_net(checkpoint, model, strict=calc_weights)
-
-        # TODO: re-run buggy experiments so this isn't necessary.
-        model.calc_weights = calc_weights
+        model, _, model_epoch = load_net(checkpoint, model, strict=True)
 
         assert epoch == model_epoch
         models[epoch + 1] = model   # Epochs are 0-indexed in files, but we want 1-indexed.
@@ -256,14 +235,11 @@ def load_models(base_model: Type[torch.nn.Module], epochs_to_load: set[int] | No
 
 def load_cnn_gabor_models(base_model: torch.nn.Module = Type[torch.nn.Module], epochs_to_load: set[int] = None,
                 gabor_models_dir: str = None, cnn_models_dir: str = None, device: str = 'cpu',
-                calc_weights: bool = True, train_args=None,
                 ) -> tuple[dict[int, torch.nn.Module], dict[int, torch.nn.Module]]:
     """Loads the Gabor + CNN models."""
 
-    gabor_models = load_models(base_model, epochs_to_load, os.path.join(gabor_models_dir, "gabornet"), device, 
-                               calc_weights, train_args)
-    cnn_models = load_models(base_model, epochs_to_load, os.path.join(cnn_models_dir, "cnn"), device, calc_weights, 
-                             train_args)
+    gabor_models = load_models(base_model, epochs_to_load, os.path.join(gabor_models_dir, "gabornet"), device)
+    cnn_models = load_models(base_model, epochs_to_load, os.path.join(cnn_models_dir, "cnn"), device)
     
     assert len(gabor_models) == len(cnn_models)
 
@@ -287,8 +263,13 @@ def main():
                                                                             "None, then will default to calc_every.")
 
     parser.add_argument("--model", type=str, default="DogCatNet", help="The base model to use for the CNNs.",
-                        choices=["DogCatNet", "DogCatNNSanity"])
-    parser.add_argument("--dataset_dir", type=str, default=None, help="Path to dataset.")
+                        choices=["DogCatNet"])
+    
+    # Dataset arguments.
+    parser.add_argument("--dataset", type=str, default="dogs-vs-cats", choices=["dogs-vs-cats", "cifar10", "fashion-mnist"])
+    parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
+    parser.add_argument("--img_size", type=int, default=256, help="Size of images to use.")
+    parser.add_argument("--n_channels", type=int, default=3, help="Number of channels in the images.")
     
     parser.add_argument("--gabor_dir", type=str, default=None, 
                         help="Name of directory to load Gabor models from. Defaults to dir_name.")
@@ -319,8 +300,8 @@ def main():
     # Load the testset.
     print("Loading dataset...")
     torch.manual_seed(args.seed)
-    train_set, test_set = load_dataset(args.dataset_dir or train_args['dataset_dir'], 
-                                       img_size=(train_args['img_size'], train_args['img_size']))
+    train_set, test_set = load_dataset(args.dataset, args.dataset_dir or train_args['dataset_dir'], 
+                                       img_size=(train_args['img_size'], train_args['img_size']), n_channels=train_args['n_channels'])
 
     # Split the trainset into train and test.
     train_set, test_set1 = torch.utils.data.random_split(
@@ -350,8 +331,7 @@ def main():
     cnn_models_dir = os.path.join(cnn_dir, "models")
     gabor_models, cnn_models = load_cnn_gabor_models(base_model, epochs_to_load=epochs, 
                                            gabor_models_dir=gabor_models_dir, cnn_models_dir=cnn_models_dir, 
-                                           device=device, calc_weights=not args.no_weight_calc,
-                                           train_args=train_args)
+                                           device=device)
 
     # Show the accuracies.
     if args.assert_gabor_frozen or args.assert_cnn_frozen:

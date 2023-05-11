@@ -10,7 +10,9 @@ import numpy as np
 from torch.utils.data import DataLoader
 
 from .analyze import load_models, calc_accuracies_full
-from .dogs_cats import DogCatNNSanity, DogCatNet, load_dataset
+from .dogs_cats import DogCatNet
+from src.datasets import load_dataset
+from src.models import CNN, CNNSmall, CNNLinear
 
 
 def compare_models(models_train: dict[str, dict[int, float | tuple[float, float]]], 
@@ -64,20 +66,18 @@ def get_acc_path(model_dir: str) -> str:
 def main():
 
     parser = argparse.ArgumentParser()
-
-    parser.add_argument("--model", type=str, default="DogCatNet", help="The base model to use for the CNNs.",
-                        choices=["DogCatNet", "DogCatNNSanity"])
     
+    # Analysis params.
     parser.add_argument("--epochs", type=int, nargs="+", default=None, help="1-index epochs to calc accuracies for.")
     parser.add_argument("--use_cache", action="store_true", help="If True, then if accuracies are already calculated, "
                                                                     "they will be loaded from cache.")
-    parser.add_argument("--dataset_dir", type=str, default=None, help="Path to dataset.")
+    # Dataset params.
+    parser.add_argument("--dataset_dir", type=str, default="data/dogs-vs-cats/", help="Path to dataset.")
     parser.add_argument("--N", type=int, default=None, help="The number of samples to use from the train / test sets.")
-    
+
     
     args = parser.parse_args()
 
-    base_model = globals()[args.model]
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Load the comparison json file.
@@ -91,7 +91,7 @@ def main():
                 model_dirs.setdefault(model_name, {})[int(seed_str)] = dir
 
     # Ensure that models are comparable + set dataset path.
-    img_size = None
+    img_size, n_channels, dataset, base_model = None, None, None, None
     dataset_dir = args.dataset_dir
     for model_name, model_dir_by_seed in model_dirs.items():
         exp_path = get_exp_path(list(model_dir_by_seed.values())[0])    # All have the same experiment info.
@@ -100,17 +100,23 @@ def main():
         with open(exp_args_path, "r") as f:
             exp_args = json.load(f)
 
-        if img_size is None:
-            img_size = exp_args['img_size']
-        else:
-            assert img_size == exp_args['img_size'], "Image sizes are not the same."
+        assert img_size == exp_args['img_size'] or img_size is None, "Image sizes are not the same."
+        img_size = exp_args['img_size']
 
         if not args.dataset_dir:
-            if dataset_dir is None:
-                dataset_dir = exp_args['dataset_dir']
-            else:
-                assert dataset_dir == exp_args['dataset_dir'], "Dataset directories are not the same."
+            assert dataset_dir == exp_args['dataset_dir'] or dataset_dir is None, "Dataset directories are not the same."
+            dataset_dir = exp_args['dataset_dir']
 
+        assert base_model == exp_args['model'] or base_model is None, "Base models are not the same."
+        base_model = exp_args['model']
+
+        assert dataset == exp_args['dataset'] or dataset is None, "Datasets are not the same."
+        dataset = exp_args['dataset']
+        
+        assert n_channels == exp_args['n_channels'] or n_channels is None, "Number of channels are not the same."
+        n_channels = exp_args['n_channels'] 
+
+    base_model = globals()[base_model]
     epochs = [epoch - 1 for epoch in args.epochs]   # 0-index epochs.
 
     # Load the models.
@@ -119,7 +125,7 @@ def main():
         for seed, model_dir in model_dir_by_seed.items():
             accuracy_dir = get_acc_path(model_dir)
             models_by_seed.setdefault(seed, {})[model_name] = {
-                "checkpoints": load_models(base_model, epochs, model_dir, device, calc_weights=False),
+                "checkpoints": load_models(base_model, epochs, model_dir, device),
                 "save_dir": accuracy_dir
                 }
 
@@ -130,7 +136,7 @@ def main():
         # Load the testset.
         print(f"Loading dataset with seed={seed}...")
         torch.manual_seed(seed)
-        train_set, test_set = load_dataset(dataset_dir, img_size=(img_size, img_size))
+        train_set, test_set = load_dataset(dataset, dataset_dir=dataset_dir, img_size=img_size, n_channels=n_channels)
 
         # Split the trainset into train and test.
         train_set, test_set1 = torch.utils.data.random_split(
@@ -143,7 +149,7 @@ def main():
         N_test = args.N if args.N else len(test_set)
         train_set, _ = torch.utils.data.random_split(train_set, [N_train, len(train_set) - N_train])
         val_set, _ = torch.utils.data.random_split(test_set1, [N_val, len(test_set1) - N_val])
-        test_set = torch.utils.data.random_split(test_set, [N_test, len(test_set) - N_test])
+        test_set, _ = torch.utils.data.random_split(test_set, [N_test, len(test_set) - N_test])
         # test_set = val_set      # Pretty sure the original papers "test set" is actually a validation set.
 
         batch_size = 64
