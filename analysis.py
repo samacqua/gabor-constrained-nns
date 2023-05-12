@@ -386,10 +386,14 @@ def load_models(config: dict, intermediate: bool = False) -> tuple[dict[str, tor
             model_b_path = os.path.join(b_model_save_dir, model_sequence, f"epoch_{i}.pth")
             model_b_checkpoints[i] = load_model(base_model, finetune_cfg['gabor_constrained'], n_channels, model_b_path)
 
-        model_as[model_sequence] = {"checkpoints": model_a_checkpoints, 
-                                    "save_dir": os.path.join(a_model_save_dir, "accuracy", model_sequence)}
-        model_bs[model_sequence] = {"checkpoints": model_b_checkpoints, 
-                                    "save_dir": os.path.join(b_model_save_dir, "accuracy", model_sequence)}
+        model_as[model_sequence] = {
+            "checkpoints": model_a_checkpoints, 
+            "save_dir": os.path.join(config['save_dir'], "dataset_a", "accuracy", model_sequence)
+        }
+        model_bs[model_sequence] = {
+            "checkpoints": model_b_checkpoints, 
+            "save_dir": os.path.join(config['save_dir'], "dataset_b", "accuracy", model_sequence)
+        }
 
     return model_as, model_bs
 
@@ -401,13 +405,22 @@ def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, 
     accuracies = {}
     pbar = tqdm(total=len(models) * len(dataloader)) if pbar is None else pbar
 
+    dataset_name = dataloader.dataset.__class__.__name__
+    dataset_name = dataloader.dataset.dataset.__class__.__name__ if dataset_name == "Subset" else dataset_name
+
     # Load from cache if it exists and was calculated with at least as many samples as the current request.
+    accuracy_dict = {}
     if cache_path and os.path.exists(cache_path) and use_cache:
         assert cache_path.endswith(".json"), "Cache path must be a JSON file."
         with open(cache_path, "r") as f:
             accuracy_dict = json.load(f)
-        if accuracy_dict["n_samples"] >= len(dataloader.dataset):
-            accuracies = {int(k): v for k, v in accuracy_dict["accuracies"].items() if int(k) in models}
+
+        if "n_samples" in accuracy_dict:    # Backwards compatibile before indexing by dataset.
+            accuracy_dict = {dataset_name: accuracy_dict}
+
+        n_samples = accuracy_dict.get(dataset_name, {}).get("n_samples", 0)
+        if n_samples >= len(dataloader.dataset):
+            accuracies = {int(k): v for k, v in accuracy_dict[dataset_name]["accuracies"].items() if int(k) in models}
 
     for epoch, model in models.items():
 
@@ -423,13 +436,14 @@ def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, 
     if cache_path:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         with open(cache_path, "w") as f:
-            json.dump({"n_samples": len(dataloader.dataset), "accuracies": accuracies}, f)
+            accuracy_dict[dataset_name] = {"accuracies": accuracies, "n_samples": len(dataloader.dataset)}
+            json.dump(accuracy_dict, f)
 
     return accuracies
 
 
 def calc_accuracies_full(models: dict[str, dict[int, torch.nn.Module]],
-               train_loader: DataLoader, test_loader: DataLoader = None, 
+               train_loader: DataLoader = None, test_loader: DataLoader = None, 
                use_cache: bool = True, device: str = 'cpu'
                ) -> dict[str, tuple[dict[int, float], dict[int, float]]]:
     """Calculates the accuracies over epochs on the train / test datasets for the multiple models.
@@ -454,7 +468,7 @@ def calc_accuracies_full(models: dict[str, dict[int, torch.nn.Module]],
 
     # Determine the size of the progress bar.
     n_checkpoints = sum([len(model_info['checkpoints']) for model_info in models.values()])
-    n_iters = n_checkpoints * (len(train_loader) + (len(test_loader) if test_loader else 0))
+    n_iters = n_checkpoints * ((len(train_loader) if train_loader else 0) + (len(test_loader) if test_loader else 0))
 
     model_accuracies = {}
     with tqdm(total=n_iters, maxinterval=5) as pbar:
@@ -468,7 +482,7 @@ def calc_accuracies_full(models: dict[str, dict[int, torch.nn.Module]],
 
             # Calculate the accuracies.
             train_accuracies = calc_accuracies(checkpoints, train_loader, cache_path=os.path.join(save_dir, "train_accuracies.json"), 
-                                            device=device, pbar=pbar, use_cache=use_cache)
+                                            device=device, pbar=pbar, use_cache=use_cache) if train_loader else None
             test_accuracies = calc_accuracies(checkpoints, test_loader, cache_path=os.path.join(save_dir, "test_accuracies.json"), 
                                             device=device, pbar=pbar, use_cache=use_cache) if test_loader else None
 
@@ -515,70 +529,74 @@ def main():
     if args.all or args.test:
         print("Testing accuracies on dataset A...")
         # TODO: make cache dataset specific.
-        accuracies_a = calc_accuracies_full(models_a, testloader_a, device=device, use_cache=False)
+        accuracies_a = calc_accuracies_full(models_a, test_loader=testloader_a, device=device, use_cache=True)
 
         print("Testing accuracies on dataset B...")
-        accuracies_b = calc_accuracies_full(models_b, testloader_b, device=device, use_cache=False)
+        accuracies_b = calc_accuracies_full(models_b, test_loader=testloader_b, device=device, use_cache=True)
 
         print("Testing accuracies on dataset A after finetuning on B...")
-        accuracies_ba = calc_accuracies_full(models_b, testloader_a, device=device, use_cache=False)
+        accuracies_ba = calc_accuracies_full(models_b, test_loader=testloader_a, device=device, use_cache=True)
 
         # Print the results.
         max_name_len = max([len(name) for name in accuracies_a])
         padded_name = "Name" + ' ' * (max_name_len - 4)
         print(f"{padded_name}\tA\tB\tA (trained on B)")
         for model_sequence in accuracies_a:
-            acc_a = max(accuracies_a[model_sequence][0].items())[1]
-            acc_b = max(accuracies_b[model_sequence][0].items())[1]
-            acc_ba = max(accuracies_ba[model_sequence][0].items())[1]
+            acc_a = max(accuracies_a[model_sequence][1].items())[1]
+            acc_b = max(accuracies_b[model_sequence][1].items())[1]
+            acc_ba = max(accuracies_ba[model_sequence][1].items())[1]
             padded_name = model_sequence + ' ' * (max_name_len - len(model_sequence))
             print(f"{padded_name}\t{acc_a}\t{acc_b}\t{acc_ba}")
 
     # Visualize the features of each model.
     if args.all or args.visualize:
         print("Visualizing features...")
-        for model_sequence, (model_as, model_bs) in models.items():
-            model_a, model_b = model_as[-1], model_bs[-1]
-            # visualize_features(model_a, save_dir=analysis_dir)
-            visualize_features(model_b, save_dir=analysis_dir)
+        raise NotImplementedError
+        # for model_sequence, (model_as, model_bs) in models.items():
+        #     model_a, model_b = model_as[-1], model_bs[-1]
+        #     # visualize_features(model_a, save_dir=analysis_dir)
+        #     visualize_features(model_b, save_dir=analysis_dir)
 
     # Run the generalization analysis.
     if args.all or args.generalization:
         print("Running generalization analysis...")
+        raise NotImplementedError
 
-        # Load the intermediate models on the finetuned dataset.
-        gabor_finetune_model_checkpoints = models['gabor'][1]
-        cnn_finetune_model_checkpoints = models['cnn'][1]
-        baseline_model_checkpoints = models['baseline'][1]
+        # # Load the intermediate models on the finetuned dataset.
+        # gabor_finetune_model_checkpoints = models['gabor'][1]
+        # cnn_finetune_model_checkpoints = models['cnn'][1]
+        # baseline_model_checkpoints = models['baseline'][1]
 
-        test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
-                                       baseline_model_checkpoints, testloader_b, device, 
-                                       save_dir=os.path.join(analysis_dir, 'generalization'))
+        # test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
+        #                                baseline_model_checkpoints, testloader_b, device, 
+        #                                save_dir=os.path.join(analysis_dir, 'generalization'))
     
     # Run the plasticity analysis.
     if args.all or args.plasticity:
         print("Running plasticity analysis...")
+        raise NotImplementedError
 
-        # Load the intermediate models on the finetuned dataset.
-        gabor_finetune_model_checkpoints = models['gabor'][3]
-        cnn_finetune_model_checkpoints = models['cnn'][3]
-        baseline_model_checkpoints = models['baseline'][3]
+        # # Load the intermediate models on the finetuned dataset.
+        # gabor_finetune_model_checkpoints = models['gabor'][3]
+        # cnn_finetune_model_checkpoints = models['cnn'][3]
+        # baseline_model_checkpoints = models['baseline'][3]
 
-        test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
-                                   baseline_model_checkpoints, testloader_a, testloader_b, device,
-                                   save_dir=os.path.join(analysis_dir, 'plasticity'))
+        # test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
+        #                            baseline_model_checkpoints, testloader_a, testloader_b, device,
+        #                            save_dir=os.path.join(analysis_dir, 'plasticity'))
         
     # Run the adversarial analysis.
     if args.all or args.adversarial:
         print("Running adversarial analysis...")
+        raise NotImplementedError
 
-        gabor_finetune_model = models['gabor'][1]
-        cnn_finetune_model = models['cnn'][1]
-        test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
-                                    save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.05)
+        # gabor_finetune_model = models['gabor'][1]
+        # cnn_finetune_model = models['cnn'][1]
+        # test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
+        #                             save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.05)
 
-        test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
-                                    save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.3)
+        # test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
+        #                             save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.3)
 
 if __name__ == '__main__':
     main()
