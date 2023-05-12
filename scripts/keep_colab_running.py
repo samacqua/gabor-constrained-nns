@@ -14,7 +14,7 @@ def main():
     # Randomly type things every 30 seconds.
     MAX_TIME = 12   # 12 hours.
     TIME_PER_LOOP = 30  # 30 seconds.
-    n_loops = MAX_TIME * 60 * 60 / TIME_PER_LOOP
+    n_loops = int(MAX_TIME * 60 * 60 / TIME_PER_LOOP)
     for _ in range(n_loops):
 
         # Type a random string (takes 5 seconds).
