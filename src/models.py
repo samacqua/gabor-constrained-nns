@@ -81,25 +81,10 @@ class GaborBase(nn.Module):
             return self.g1.calculate_weights()
 
         return self.g1.weight
-    
-    def _freeze_layer(self, layer: nn.Module):
-        """Freezes the layer."""
-
-        layer.weight.requires_grad = False
-
-        # Need to freeze the Gabor parameters.
-        try:
-            layer.freq.requires_grad = False
-            layer.theta.requires_grad = False
-            layer.psi.requires_grad = False
-            layer.sigma.requires_grad = False
-
-        except:
-            layer.bias.requires_grad = False
 
     def freeze_first_layer(self):
         """Freezes the first layer."""
-        self._freeze_layer(self.g1)
+        self.g1.requires_grad_(False)
 
 
 class CNN(GaborBase):
