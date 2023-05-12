@@ -91,7 +91,6 @@ def main():
                 model_dirs.setdefault(model_name, {})[int(seed_str)] = dir
 
     # Ensure that models are comparable + set dataset path.
-    _, _, n_classes = load_dataset(dataset, dataset_dir=dataset_dir, img_size=img_size, n_channels=n_channels)
     img_size, n_channels, dataset, base_model = None, None, None, None
     dataset_dir = args.dataset_dir
     for model_name, model_dir_by_seed in model_dirs.items():
@@ -117,6 +116,7 @@ def main():
         assert n_channels == exp_args['n_channels'] or n_channels is None, "Number of channels are not the same."
         n_channels = exp_args['n_channels'] 
 
+    _, _, n_classes = load_dataset(dataset, dataset_dir=dataset_dir, img_size=img_size, n_channels=n_channels)
     base_model = globals()[base_model]
     epochs = [epoch - 1 for epoch in args.epochs]   # 0-index epochs.
 
@@ -182,14 +182,18 @@ def main():
     for model_name, accs in train_accs.items():
         model_stats = {}
         for epoch in args.epochs:
-            model_stats[epoch] = (np.mean([acc[epoch] for acc in accs]), np.std([acc[epoch] for acc in accs]) / np.sqrt(len(accs)))
+            model_stats[epoch] = (
+                np.mean([acc[epoch] for acc in accs if epoch in acc]), 
+                np.std([acc[epoch] for acc in accs if epoch in acc]) / np.sqrt(len(accs)))
 
         train_acc_stats[model_name] = model_stats
 
     for model_name, accs in test_accs.items():
         model_stats = {}
         for epoch in args.epochs:
-            model_stats[epoch] = (np.mean([acc[epoch] for acc in accs]), np.std([acc[epoch] for acc in accs]) / np.sqrt(len(accs)))
+            model_stats[epoch] = (
+                np.mean([acc[epoch] for acc in accs if epoch in acc]), 
+                np.std([acc[epoch] for acc in accs if epoch in acc]) / np.sqrt(len(accs)))
 
         test_acc_stats[model_name] = model_stats
 
