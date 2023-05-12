@@ -24,86 +24,70 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def test_generalization_hypothesis(gabor_constrained_models: dict[int, list[torch.nn.Module]], 
-                                   unconstrained_models: dict[int, list[torch.nn.Module]], 
-                                   baseline_models: dict[int, list[torch.nn.Module]], test_loader_b, device, 
-                                   save_dir: str):
+def test_generalization_hypothesis(models: list[dict[str, dict[int, torch.nn.Module]]], test_loader_b, device, 
+                                   save_dir: str, use_cache: bool = True):
     """Tests the hypothesis: Gabor-constrained neural networks will finetune better (converge faster + higher acc).
     
     Args:
-        gabor_constrained_models: A dictionary of list of Gabor model checkpoints, indexed by epoch.
+        models: list of models finetuned on b, where each model dict is of the form
+            {model_name: {"checkpoints":{epoch: model}, "save_dir": save_dir}} and is a repeat.
         unconstrained_models: A dictionary of list of CNN model checkpoints, indexed by epoch.
         test_loader_b: The dataloader for the test set of dataset B.
         device: The device to run the models on.
     """
-    epochs = sorted(list(gabor_constrained_models.keys()))
+
+    assert {"gabor", "cnn", "baseline"} == set(models[0]), \
+        f"Model sequence must be 'gabor', 'cnn', and 'baseline', not {set(models[0])}."
+
+    epochs = sorted(list(models[0]["gabor"]["checkpoints"].keys()))
 
     # Get the accuracy of each model at each stage of convergence.
-    try:
-        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "rb") as f:
-            gabor_accuracies = pickle.load(f)
-        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "rb") as f:
-            unconstrained_accuracies = pickle.load(f)
-        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "rb") as f:
-            baseline_accuracies = pickle.load(f)
-    except FileNotFoundError:
-        gabor_accuracies = {}
-        unconstrained_accuracies = {}
-        baseline_accuracies = {}
-        for epoch in tqdm(epochs):
+    gabor_accuracies, unconstrained_accuracies, baseline_accuracies = [], [], []
+    for repeat_models in models:
+        accuracies = calc_accuracies_full(repeat_models, test_loader=test_loader_b, device=device, use_cache=use_cache)
 
-            # Get the accuracy of each model.
-            for gabor_model, unconstrained_model, baseline_model in zip(
-                gabor_constrained_models[epoch], unconstrained_models[epoch], baseline_models[epoch]):
+        gabor_accuracies.append({epoch: accuracies["gabor"][1][epoch] for epoch in epochs})
+        unconstrained_accuracies.append({epoch: accuracies["cnn"][1][epoch] for epoch in epochs})
+        baseline_accuracies.append({epoch: accuracies["baseline"][1][epoch] for epoch in epochs})
 
-                gabor_acc = test_accuracy(test_loader_b, gabor_model, device)
-                unconstrained_acc = test_accuracy(test_loader_b, unconstrained_model, device)
-                baseline_acc = test_accuracy(test_loader_b, baseline_model, device)
-
-                gabor_accuracies.setdefault(epoch, []).append(gabor_acc)
-                unconstrained_accuracies.setdefault(epoch, []).append(unconstrained_acc)
-                baseline_accuracies.setdefault(epoch, []).append(baseline_acc)
-
-            # TODO: Check if the difference is statistically significant.
-            pass
-
-        # Save the results.
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "wb") as f:
-            pickle.dump(gabor_accuracies, f)
-        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "wb") as f:
-            pickle.dump(unconstrained_accuracies, f)
-        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "wb") as f:
-            pickle.dump(baseline_accuracies, f)
+    # TODO: Check if the difference is statistically significant.
+    pass
 
     # Calculate the mean accuracy of each model at each stage of convergence.
-    gabor_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in gabor_accuracies.items()}
-    unconstrained_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in unconstrained_accuracies.items()}
-    baseline_mean_accuracies = {epoch: np.mean(accs) for epoch, accs in baseline_accuracies.items()}
+    N = len(models)
+    gabor_mean_accuracies = [np.mean([gabor_accuracies[i][epoch] for i in range(N)]) for epoch in epochs]
+    gabor_conf = np.array([np.std([gabor_accuracies[i][epoch] for i in range(N)]) / np.sqrt(N) for epoch in epochs]) * 1.96
+    unconstrained_mean_accuracies = [np.mean([unconstrained_accuracies[i][epoch] for i in range(N)]) for epoch in epochs]
+    unconstrained_conf = np.array([np.std([unconstrained_accuracies[i][epoch] for i in range(N)]) / np.sqrt(N) for epoch in epochs]) * 1.96
+    baseline_mean_accuracies = [np.mean([baseline_accuracies[i][epoch] for i in range(N)]) for epoch in epochs]
+    baseline_conf = np.array([np.std([baseline_accuracies[i][epoch] for i in range(N)]) / np.sqrt(N) for epoch in epochs]) * 1.96
 
     # Plot the accuracy of each model at each stage of convergence.
     fig, ax = plt.subplots()
-    ax.plot(gabor_mean_accuracies.keys(), gabor_mean_accuracies.values(), label="Gabor")
-    ax.plot(unconstrained_mean_accuracies.keys(), unconstrained_mean_accuracies.values(), label="Unconstrained")
-    ax.plot(baseline_mean_accuracies.keys(), baseline_mean_accuracies.values(), label="Baseline")
+
+    x = range(len(gabor_mean_accuracies))
+    ax.errorbar(x, gabor_mean_accuracies, yerr=gabor_conf, label="Gabor")
+    ax.errorbar(x, unconstrained_mean_accuracies, yerr=unconstrained_conf, label="Unconstrained")
+    ax.errorbar(x, baseline_mean_accuracies, yerr=baseline_conf, label="Baseline")
+
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Accuracy")
     ax.set_title("Accuracy of Gabor and Unconstrained Models at Each Stage of Convergence")
     ax.legend()
 
+    os.makedirs(save_dir, exist_ok=True)
     plt.savefig(os.path.join(save_dir, "accuracy_vs_epoch.png"))
     plt.show()
 
 
-def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, baseline_models, test_loader_a, 
-                               test_loader_b, device, save_dir):
+def test_plasticity_hypothesis(models, test_loader_a, 
+                               test_loader_b, device, save_dir, use_cache: bool = True):
     """Tests the hypothesis: Gabor-constrained neural networks will retain original performance better.
 
     Expects that the models are finetuned to the same accuracy or loss.
     
     Args:
-        gabor_constrained_models: A dictionary of list of Gabor model checkpoints, indexed by epoch.
-        unconstrained_models: A dictionary of list of CNN model checkpoints, indexed by epoch.
+        models: list of models finetuned on b {model_name: {"checkpoints":{epoch: model}, "save_dir": save_dir}}.
         test_loader_a: The dataloader for the test set of dataset A.
         test_loader_b: The dataloader for the test set of dataset B.
         device: The device to run the models on.
@@ -111,66 +95,60 @@ def test_plasticity_hypothesis(gabor_constrained_models, unconstrained_models, b
 
     # TODO: Check that actually tuned to same loss.
 
-    epochs = sorted(list(gabor_constrained_models.keys()))
+    assert {"gabor", "cnn", "baseline"} == set(models[0]), \
+        f"Model sequence must be 'gabor', 'cnn', and 'baseline', not {set(models[0])}."
 
-    # Check if the accuracy on dataset A, after finetuning to accuracy X on dataset B, is higher for the constrained
-    # model than the unconstrained model.
-    try:
-        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "rb") as f:
-            gabor_accuracies = pickle.load(f)
-        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "rb") as f:
-            unconstrained_accuracies = pickle.load(f)
-        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "rb") as f:
-            baseline_accuracies = pickle.load(f)
-    except FileNotFoundError:
-        gabor_accuracies = {}
-        unconstrained_accuracies = {}
-        baseline_accuracies = {}
-        for epoch in tqdm(epochs):
+    epochs = sorted(list(models[0]["gabor"]["checkpoints"].keys()))
 
-            # Get the accuracy of each model.
-            for gabor_model, unconstrained_model, baseline_model in zip(
-                gabor_constrained_models[epoch], unconstrained_models[epoch], baseline_models[epoch]):
+    # Calculate accuracies.
+    gabor_accuracies, unconstrained_accuracies, baseline_accuracies = [], [], []
+    for repeat_models in models:
 
-                gabor_acc_a = test_accuracy(test_loader_a, gabor_model, device)
-                unconstrained_acc_a = test_accuracy(test_loader_a, unconstrained_model, device)
-                baseline_acc_a = test_accuracy(test_loader_a, baseline_model, device)
+        accuracies_b = calc_accuracies_full(repeat_models, test_loader=test_loader_b, device=device, use_cache=use_cache)
+        accuracies_a = calc_accuracies_full(repeat_models, test_loader=test_loader_a, device=device, use_cache=use_cache)
 
-                gabor_acc_b = test_accuracy(test_loader_b, gabor_model, device)
-                unconstrained_acc_b = test_accuracy(test_loader_b, unconstrained_model, device)
-                baseline_acc_b = test_accuracy(test_loader_b, baseline_model, device)
+        gabor_accuracies.append([(accuracies_a["gabor"][1][epoch], accuracies_b["gabor"][1][epoch]) for epoch in epochs])
+        unconstrained_accuracies.append([(accuracies_a["cnn"][1][epoch], accuracies_b["cnn"][1][epoch]) for epoch in epochs])
+        baseline_accuracies.append([(accuracies_a["baseline"][1][epoch], accuracies_b["baseline"][1][epoch]) for epoch in epochs])
 
-                gabor_accuracies.setdefault(gabor_acc_b, []).append(gabor_acc_a)
-                unconstrained_accuracies.setdefault(unconstrained_acc_b, []).append(unconstrained_acc_a)
-                baseline_accuracies.setdefault(baseline_acc_b, []).append(baseline_acc_a)
+    # TODO: Check if the difference is statistically significant.
+    pass
 
-            # TODO: Check if the difference is statistically significant.
-            pass
-
-        # Save the results.
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "gabor_accuracies.pkl"), "wb") as f:
-            pickle.dump(gabor_accuracies, f)
-        with open(os.path.join(save_dir, "unconstrained_accuracies.pkl"), "wb") as f:
-            pickle.dump(unconstrained_accuracies, f)
-        with open(os.path.join(save_dir, "baseline_accuracies.pkl"), "wb") as f:
-            pickle.dump(baseline_accuracies, f)
+    # Create mapping from accuracy on dataset A to accuracy on dataset B.
+    gabor_accuracies_ba = [item for sublist in gabor_accuracies for item in sublist]
+    unconstrained_accuracies_ba = [item for sublist in unconstrained_accuracies for item in sublist]
+    baseline_accuracies_ba = [item for sublist in baseline_accuracies for item in sublist]
 
     # Calculate the mean accuracy of each model on dataset A at each stage of convergence of training on B.
-    gabor_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in gabor_accuracies.items()}
-    unconstrained_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in unconstrained_accuracies.items()}
-    baseline_mean_accuracies = {acc_b: np.mean(accs_a) for acc_b, accs_a in baseline_accuracies.items()}
+    N = len(models)
+    gabor_mean_accuracies_a = [np.mean([gabor_accuracies[i][epoch][0] for i in range(N)]) for epoch in epochs]
+    gabor_conf = np.array([np.std([gabor_accuracies[i][epoch][0] for i in range(N)]) / np.sqrt(N) for epoch in epochs]) * 1.96
+    unconstrained_mean_accuracies_a = [np.mean([unconstrained_accuracies[i][epoch][0] for i in range(N)]) for epoch in epochs]
+    unconstrained_conf = np.array([np.std([unconstrained_accuracies[i][epoch][0] for i in range(N)]) / np.sqrt(N) for epoch in epochs]) * 1.96
+    baseline_mean_accuracies_a = [np.mean([baseline_accuracies[i][epoch][0] for i in range(N)]) for epoch in epochs]
+    baseline_conf = np.array([np.std([baseline_accuracies[i][epoch][0] for i in range(N)]) / np.sqrt(N) for epoch in epochs]) * 1.96
 
     # Plot the accuracy of each model at each stage of convergence.
-    fig, ax = plt.subplots()
-    ax.plot(gabor_mean_accuracies.keys(), gabor_mean_accuracies.values(), '-o', label="Gabor")
-    ax.plot(unconstrained_mean_accuracies.keys(), unconstrained_mean_accuracies.values(), '-o', label="Unconstrained")
-    ax.plot(baseline_mean_accuracies.keys(), baseline_mean_accuracies.values(), '-o', label="Baseline")
-    ax.set_xlabel("Accuracy on Dataset B")
-    ax.set_ylabel("Accuracy on Dataset A")
-    ax.set_title("Accuracy of Gabor and Unconstrained Models at Each Stage of Convergence")
-    ax.legend()
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 5))
+    x = range(len(gabor_mean_accuracies_a))
+    ax0.errorbar(x, gabor_mean_accuracies_a, yerr=gabor_conf, label="Gabor")
+    ax0.errorbar(x, unconstrained_mean_accuracies_a, yerr=unconstrained_conf, label="Unconstrained")
+    ax0.errorbar(x, baseline_mean_accuracies_a, yerr=baseline_conf, label="Baseline")
 
+    ax0.set_xlabel("epoch")
+    ax0.set_ylabel("Accuracy on Dataset A")
+    ax0.legend()
+
+    ax1.scatter([b for a, b in gabor_accuracies_ba], [a for a, b in gabor_accuracies_ba], label="Gabor")
+    ax1.scatter([b for a, b in unconstrained_accuracies_ba], [a for a, b in unconstrained_accuracies_ba], label="Unconstrained")
+    ax1.scatter([b for a, b in baseline_accuracies_ba], [a for a, b in baseline_accuracies_ba], label="Baseline")
+    ax1.set_xlabel("Accuracy on Dataset B")
+    ax1.set_ylabel("Accuracy on Dataset A")
+    ax1.legend()
+
+    fig.suptitle("Accuracy of Gabor and Unconstrained Models at Each Stage of Convergence")
+
+    os.makedirs(save_dir, exist_ok=True)
     plt.savefig(os.path.join(save_dir, "accuracy_vs_accuracy.png"))
     plt.show()
 
@@ -208,17 +186,23 @@ def adversarial_attack(model, x, y, device, epsilon=0.1):
     return x_adv, output, output_adversarial
 
 
-def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, test_loader, device, save_dir, epsilon=0.1):
+def test_adversarial_hypothesis(models, test_loader, device, save_dir, epsilon=0.1):
     """Tests the hypothesis: Gabor-constrained neural networks will be more robust to adversarial attacks.
 
     Expects that the models are finetuned to the same accuracy or loss.
     
     Args:
-        gabor_constrained_model: The Gabor model.
-        unconstrained_model: The CNN model.
+        models: list of models finetuned on b {model_name: {"checkpoints":{epoch: model}, "save_dir": save_dir}}.
         test_loader: The dataloader for the test set.
         device: The device to run the models on.
     """
+
+    # TODO: models across different runs.
+    models = models[0]
+
+    # Get the final models.
+    gabor_constrained_model = models["gabor"]["checkpoints"][max(models["gabor"]["checkpoints"].keys())]
+    unconstrained_model = models["cnn"]["checkpoints"][max(models["cnn"]["checkpoints"].keys())]
 
     # For each model, sample examples that it gets correct.
     gabor_correct = []
@@ -290,7 +274,8 @@ def test_adversarial_hypothesis(gabor_constrained_model, unconstrained_model, te
     print(f"Unconstrained image difference: {np.mean(unconstrained_img_diffs):.3f} {np.std(unconstrained_img_diffs):.3f}")
 
 
-def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1, save_dir: str = None): 
+def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1, 
+                     save_dir: str = None, title: str = None): 
     """Visualizes a tensor."""
     n,c,w,h = tensor.shape
 
@@ -303,6 +288,8 @@ def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False
     grid = utils.make_grid(tensor, nrow=nrow, normalize=True, padding=padding)
     plt.figure( figsize=(nrow,rows) )
     plt.imshow(grid.numpy().transpose((1, 2, 0)))
+    if title:
+        plt.title(title)
 
     if save_dir is not None:
         plt.savefig(os.path.join(save_dir, "features.png"))
@@ -310,12 +297,12 @@ def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False
     plt.show()
 
 
-def visualize_features(model: torch.nn.Module, save_dir: str):
+def visualize_features(model: torch.nn.Module, save_dir: str, title: str):
     """Visualizes the features of a model."""
 
     # Get the weights of the first layer.
     weights = model.g1.weight.data.cpu()
-    visualize_tensor(weights, ch=0, allkernels=False, save_dir=save_dir)
+    visualize_tensor(weights, ch=0, allkernels=False, save_dir=save_dir, title=title)
 
 
 def test_accuracy(test_loader: torch.utils.data.DataLoader, model: torch.nn.Module, device: torch.device, pbar: tqdm = None):
@@ -377,14 +364,14 @@ def load_models(config: dict, intermediate: bool = False) -> tuple[dict[str, tor
         model_a_checkpoints = {}
         for i in range(0 if intermediate else a_epochs - 1, a_epochs):
             model_a_path = os.path.join(a_model_save_dir, model_sequence, f"epoch_{i}.pth")
-            model_a_checkpoints[i] = load_model(base_model, init_cfg['gabor_constrained'], n_channels, model_a_path)
+            model_a_checkpoints[i] = load_model(deepcopy(base_model), init_cfg['gabor_constrained'], n_channels, model_a_path)
 
         # Load the models from dataset B.
         finetune_cfg = config['schedules'][model_sequence]['finetune']
         model_b_checkpoints = {}
         for i in range(0 if intermediate else b_epochs - 1, b_epochs):
             model_b_path = os.path.join(b_model_save_dir, model_sequence, f"epoch_{i}.pth")
-            model_b_checkpoints[i] = load_model(base_model, finetune_cfg['gabor_constrained'], n_channels, model_b_path)
+            model_b_checkpoints[i] = load_model(deepcopy(base_model), finetune_cfg['gabor_constrained'], n_channels, model_b_path)
 
         model_as[model_sequence] = {
             "checkpoints": model_a_checkpoints, 
@@ -497,6 +484,7 @@ def main():
     # Parse command line arguments.
     parser = argparse.ArgumentParser(description="Run experiments.")
     parser.add_argument("config", type=str, help="Path to the configuration file.")
+    parser.add_argument("--no_cache", action="store_true", help="Don't use the cache.")
     parser.add_argument("--all", action="store_true", help="Run all the analyses.")
 
     parser.add_argument("--test", action="store_true", help="Calculate test accuracy of the models.")
@@ -507,17 +495,26 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse the configuration file + run the experiment.
+    # Parse the configuration file.
     config = parse_config(args.config)
-    config['save_dir'] = os.path.join(config['save_dir'], '0')   # TODO: handle multiple runs.
-
-    # Create the analysis folder.
-    analysis_dir = os.path.join(config['save_dir'], "analysis")
-    os.makedirs(analysis_dir, exist_ok=True)
-
-    # Load the models.
-    models_a, models_b = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    use_cache = not args.no_cache
+
+    # Load the models for each repeat.
+    og_save_dir = config['save_dir']
+    models_a_repeats = []
+    models_b_repeats = []
+    for repeat in range(config['n_repeats']):
+        config['save_dir'] = os.path.join(og_save_dir, str(repeat))
+
+        # Create the analysis folder.
+        analysis_dir = os.path.join(config['save_dir'], "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+
+        # Load the models.
+        models_a, models_b = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
+        models_a_repeats.append(models_a)
+        models_b_repeats.append(models_b)
 
     # Load the datasets.
     if args.all or args.generalization or args.plasticity or args.test or args.adversarial:
@@ -527,76 +524,82 @@ def main():
 
     # Test the final accuracies of the models.
     if args.all or args.test:
-        print("Testing accuracies on dataset A...")
-        # TODO: make cache dataset specific.
-        accuracies_a = calc_accuracies_full(models_a, test_loader=testloader_a, device=device, use_cache=True)
+        accuracies_a = []
+        accuracies_b = []
+        accuracies_ba = []
+        for repeat, (models_a, models_b) in enumerate(zip(models_a_repeats, models_b_repeats)):
+            print(f"\nRepeat {repeat}:")
 
-        print("Testing accuracies on dataset B...")
-        accuracies_b = calc_accuracies_full(models_b, test_loader=testloader_b, device=device, use_cache=True)
+            print("Testing accuracies on dataset A...")
+            acc_a = calc_accuracies_full(models_a, test_loader=testloader_a, device=device, use_cache=use_cache)
+            acc_a = {model_sequence: max(accs[1].items())[1] for model_sequence, accs in acc_a.items()}
+            accuracies_a.append(acc_a)
 
-        print("Testing accuracies on dataset A after finetuning on B...")
-        accuracies_ba = calc_accuracies_full(models_b, test_loader=testloader_a, device=device, use_cache=True)
+            print("Testing accuracies on dataset B...")
+            acc_b = calc_accuracies_full(models_b, test_loader=testloader_b, device=device, use_cache=use_cache)
+            acc_b = {model_sequence: max(accs[1].items())[1] for model_sequence, accs in acc_b.items()}
+            accuracies_b.append(acc_b)
+
+            print("Testing accuracies on dataset A after finetuning on B...")
+            acc_ba = calc_accuracies_full(models_b, test_loader=testloader_a, device=device, use_cache=use_cache)
+            acc_ba = {model_sequence: max(accs[1].items())[1] for model_sequence, accs in acc_ba.items()}
+            accuracies_ba.append(acc_ba)
 
         # Print the results.
-        max_name_len = max([len(name) for name in accuracies_a])
+        max_name_len = max([len(name) for name in accuracies_a[0]])
         padded_name = "Name" + ' ' * (max_name_len - 4)
-        print(f"{padded_name}\tA\tB\tA (trained on B)")
-        for model_sequence in accuracies_a:
-            acc_a = max(accuracies_a[model_sequence][1].items())[1]
-            acc_b = max(accuracies_b[model_sequence][1].items())[1]
-            acc_ba = max(accuracies_ba[model_sequence][1].items())[1]
+        print(f"{padded_name}\tA\t\t\tB\t\t\tA (trained on B)")
+        for model_sequence in accuracies_a[0]:
+            # Get accuracies after last epoch.
+            acc_a = np.mean([acc[model_sequence] for acc in accuracies_a])
+            a_std_err = np.std([acc[model_sequence] for acc in accuracies_a]) / np.sqrt(len(accuracies_a))
+            acc_a_range = round(acc_a - a_std_err, 3), round(acc_a + a_std_err, 3)
+
+            acc_b = np.mean([acc[model_sequence] for acc in accuracies_b])
+            b_std_err = np.std([acc[model_sequence] for acc in accuracies_b]) / np.sqrt(len(accuracies_b))
+            acc_b_range = round(acc_b - b_std_err, 3), round(acc_b + b_std_err, 3)
+
+            acc_ba = np.mean([acc[model_sequence] for acc in accuracies_ba])
+            ba_std_err = np.std([acc[model_sequence] for acc in accuracies_ba]) / np.sqrt(len(accuracies_ba))
+            acc_ba_range = round(acc_ba - ba_std_err, 3), round(acc_ba + ba_std_err, 3)
+
             padded_name = model_sequence + ' ' * (max_name_len - len(model_sequence))
-            print(f"{padded_name}\t{acc_a}\t{acc_b}\t{acc_ba}")
+            print(f"{padded_name}\t{acc_a:.3f} {acc_a_range}\t{acc_b:.3f} {acc_b_range}\t{acc_ba:.3f} {acc_ba_range}")
 
     # Visualize the features of each model.
     if args.all or args.visualize:
         print("Visualizing features...")
-        raise NotImplementedError
-        # for model_sequence, (model_as, model_bs) in models.items():
-        #     model_a, model_b = model_as[-1], model_bs[-1]
-        #     # visualize_features(model_a, save_dir=analysis_dir)
-        #     visualize_features(model_b, save_dir=analysis_dir)
+        models_a, models_b = models_a_repeats[-1], models_b_repeats[-1]
+        for model_sequence in models_a:
+            # model_a = max(models_a[model_sequence]["checkpoints"].items())[1]   # Get the last model.
+            # a_save_dir = models_a[model_sequence]["save_dir"]
+            # visualize_features(model_a, save_dir=a_save_dir, title=model_sequence)
+
+            model_b = max(models_b[model_sequence]["checkpoints"].items())[1]   # Get the last model.
+            b_save_dir = models_b[model_sequence]["save_dir"]
+            visualize_features(model_b, save_dir=b_save_dir, title=model_sequence)
 
     # Run the generalization analysis.
     if args.all or args.generalization:
         print("Running generalization analysis...")
-        raise NotImplementedError
-
-        # # Load the intermediate models on the finetuned dataset.
-        # gabor_finetune_model_checkpoints = models['gabor'][1]
-        # cnn_finetune_model_checkpoints = models['cnn'][1]
-        # baseline_model_checkpoints = models['baseline'][1]
-
-        # test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
-        #                                baseline_model_checkpoints, testloader_b, device, 
-        #                                save_dir=os.path.join(analysis_dir, 'generalization'))
+        test_generalization_hypothesis(models_b_repeats, testloader_b, device, 
+                                       save_dir=os.path.join(analysis_dir, 'generalization'), use_cache=use_cache)
     
     # Run the plasticity analysis.
     if args.all or args.plasticity:
         print("Running plasticity analysis...")
-        raise NotImplementedError
-
-        # # Load the intermediate models on the finetuned dataset.
-        # gabor_finetune_model_checkpoints = models['gabor'][3]
-        # cnn_finetune_model_checkpoints = models['cnn'][3]
-        # baseline_model_checkpoints = models['baseline'][3]
-
-        # test_plasticity_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
-        #                            baseline_model_checkpoints, testloader_a, testloader_b, device,
-        #                            save_dir=os.path.join(analysis_dir, 'plasticity'))
+        test_plasticity_hypothesis(models_b_repeats, testloader_a, testloader_b, device,
+                                   save_dir=os.path.join(analysis_dir, 'plasticity'), use_cache=use_cache)
         
     # Run the adversarial analysis.
     if args.all or args.adversarial:
         print("Running adversarial analysis...")
-        raise NotImplementedError
 
-        # gabor_finetune_model = models['gabor'][1]
-        # cnn_finetune_model = models['cnn'][1]
-        # test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
-        #                             save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.05)
+        test_adversarial_hypothesis(models_b_repeats, testloader_b, device, 
+                                    save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.05)
 
-        # test_adversarial_hypothesis(gabor_finetune_model, cnn_finetune_model, testloader_b, device, 
-        #                             save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.3)
+        test_adversarial_hypothesis(models_b_repeats, testloader_b, device, 
+                                    save_dir=os.path.join(analysis_dir, 'adversarial'), epsilon=0.3)
 
 if __name__ == '__main__':
     main()

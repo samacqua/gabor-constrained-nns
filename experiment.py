@@ -161,7 +161,7 @@ def main():
     og_save_dir = config['save_dir']
     for i in range(config['n_repeats']):
         config['save_dir'] = os.path.join(og_save_dir, str(i))
-        print(f"Running repeat {i} of {config['n_repeats']}")
+        print(f"Running repeat {i+1} of {config['n_repeats']}")
         run_experiment(deepcopy(config))
 
 
