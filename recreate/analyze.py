@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .dogs_cats import DogCatNet
-from analysis import test_accuracy
+from analysis import calc_accuracies_full
 from gabor_layer import GaborConv2dPip, GaborConv2dGithub, GaborConv2dGithubUpdate
 from src.datasets import load_dataset
 from src.models import load_net, GaborBase
@@ -69,91 +69,6 @@ def make_accuracy_fig(gabor_train: dict[int, float], cnn_train: dict[int, float]
         plt.savefig(os.path.join(save_dir, "accuracy.png"))
 
     plt.show()
-
-
-def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, cache_path: str = None, 
-                    device: str = "cpu", pbar=None, use_cache: bool = False) -> dict[int, float]:
-    """Calculates the accuracy of a single model over the course of training on 1 dataloader."""
-
-    accuracies = {}
-    pbar = tqdm(total=len(models) * len(dataloader)) if pbar is None else pbar
-
-    # Load from cache if it exists and was calculated with at least as many samples as the current request.
-    if cache_path and os.path.exists(cache_path) and use_cache:
-        assert cache_path.endswith(".json"), "Cache path must be a JSON file."
-        with open(cache_path, "r") as f:
-            accuracy_dict = json.load(f)
-        if accuracy_dict["n_samples"] >= len(dataloader.dataset):
-            accuracies = {int(k): v for k, v in accuracy_dict["accuracies"].items() if int(k) in models}
-
-    for epoch, model in models.items():
-
-        # If we already have the accuracy, skip.
-        if epoch in accuracies:
-            pbar.update(len(dataloader))
-            continue
-
-        # Otherwise, calculate the accuracy.
-        accuracies[epoch] = test_accuracy(dataloader, model, device=device, pbar=pbar)
-
-    # Save to cache.
-    if cache_path:
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        with open(cache_path, "w") as f:
-            json.dump({"n_samples": len(dataloader.dataset), "accuracies": accuracies}, f)
-
-    return accuracies
-
-
-def calc_accuracies_full(models: dict[str, dict[int, torch.nn.Module]],
-               train_loader: DataLoader, test_loader: DataLoader, 
-               use_cache: bool = True, device: str = 'cpu'
-               ) -> dict[str, tuple[dict[int, float], dict[int, float]]]:
-    """Calculates the accuracies over epochs on the train / test datasets for the multiple models.
-    
-    Args:
-        models: {model_name: {"checkpoints":{epoch: model}, "save_dir": save_dir}}
-        train_loader: The dataloader for the training dataset.
-        test_loader: The dataloader for the test dataset.
-        save_dir: The directory to save the accuracies to.
-        use_cache: Whether to use the cache or not.
-        device: The device to run the models on.
-
-    Returns:
-        {model_name: ({epoch: train_accuracy}, {epoch: test_accuracy}})
-    """
-
-    # Check input is well formed.
-    try:
-        _ = [model_info['checkpoints'] for model_info in models.values()]
-        _ = [model_info['save_dir'] for model_info in models.values()]
-    except KeyError:
-        raise ValueError("Models must be a dictionary of {model_name: {'checkpoints': {epoch: model}, 'save_dir': save_dir}}")
-
-    # Determine the size of the progress bar.
-    n_checkpoints = sum([len(model_info['checkpoints']) for model_info in models.values()])
-    n_iters = n_checkpoints * (len(train_loader) + len(test_loader))
-
-    model_accuracies = {}
-    with tqdm(total=n_iters, maxinterval=5) as pbar:
-            
-        # Calculate the accuracies for each model.
-        for model_name, model_info in models.items():
-
-            # Load the checkpoints.
-            checkpoints = model_info['checkpoints']
-            save_dir = model_info['save_dir']
-
-            # Calculate the accuracies.
-            train_accuracies = calc_accuracies(checkpoints, train_loader, cache_path=os.path.join(save_dir, "train_accuracies.json"), 
-                                            device=device, pbar=pbar, use_cache=use_cache)
-            test_accuracies = calc_accuracies(checkpoints, test_loader, cache_path=os.path.join(save_dir, "test_accuracies.json"), 
-                                            device=device, pbar=pbar, use_cache=use_cache)
-
-            # Save the accuracies.
-            model_accuracies[model_name] = (train_accuracies, test_accuracies)
-
-    return model_accuracies
 
 
 def calc_accuracies_cnn_gabor(gabor_models: dict[int, torch.nn.Module], cnn_models: dict[int, torch.nn.Module], 

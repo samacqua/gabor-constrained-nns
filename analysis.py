@@ -11,10 +11,12 @@ import numpy as np
 from tqdm import tqdm
 import pickle
 import scipy.stats as stats
+import json
 
 import torch
 from torchvision import utils
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from parse_config import parse_config
 
@@ -341,7 +343,7 @@ def load_model(base_model: torch.nn.Module, is_gabornet: bool, n_channels: int, 
 
     model = base_model      # (is_gabornet=is_gabornet, n_channels=n_channels)
     try:
-        model.load_state_dict(torch.load(save_path))
+        model.load_state_dict(torch.load(save_path)["model_state_dict"])
     except FileNotFoundError:
         print("Could not load model from path: {}".format(save_path))
         model = None
@@ -349,60 +351,131 @@ def load_model(base_model: torch.nn.Module, is_gabornet: bool, n_channels: int, 
     return model
 
 
-def load_models(config: dict, intermediate: bool = False) -> dict[str, tuple[torch.nn.Module, torch.nn.Module]]:
+def load_models(config: dict, intermediate: bool = False) -> tuple[dict[str, torch.nn.Module], dict[str, torch.nn.Module]]:
     """Loads the final models."""
 
-    # TODO: Load across different runs.
+    a_epochs = config["training"]["initial"]["epochs"]
+    b_epochs = config["training"]["finetune"]["epochs"]
 
-    model_save_dir = os.path.join(config['save_dir'], "models")
+    a_model_save_dir = os.path.join(config['save_dir'], "dataset_a", "models")
+    b_model_save_dir = os.path.join(config['save_dir'], "dataset_b", "models")
     base_model = config['base_model']
     n_channels = config['datasets']['params']['n_channels']
 
-    models = {}
-    for model_sequence in os.listdir(model_save_dir):
+    a_models = sorted(os.listdir(a_model_save_dir))
+    b_models = sorted(os.listdir(b_model_save_dir))
+    model_as = {}
+    model_bs = {}
+    for model_sequence, model_sequence_ in zip(a_models, b_models):
 
-        # If not simple gabor or cnn.
-        if model_sequence not in ['gabor', 'cnn', 'baseline']:
+        assert model_sequence == model_sequence_, "Model sequences do not match between the 2 datasets."
+        assert model_sequence in ['gabor', 'cnn', 'baseline'], "Model sequence not supported."
+
+        # Load the models from dataset A.
+        init_cfg = config['schedules'][model_sequence]['initial_train']
+        base_model = config['schedules'][model_sequence]['model']
+        model_a_checkpoints = {}
+        for i in range(0 if intermediate else a_epochs - 1, a_epochs):
+            model_a_path = os.path.join(a_model_save_dir, model_sequence, f"epoch_{i}.pth")
+            model_a_checkpoints[i] = load_model(base_model, init_cfg['gabor_constrained'], n_channels, model_a_path)
+
+        # Load the models from dataset B.
+        finetune_cfg = config['schedules'][model_sequence]['finetune']
+        model_b_checkpoints = {}
+        for i in range(0 if intermediate else b_epochs - 1, b_epochs):
+            model_b_path = os.path.join(b_model_save_dir, model_sequence, f"epoch_{i}.pth")
+            model_b_checkpoints[i] = load_model(base_model, finetune_cfg['gabor_constrained'], n_channels, model_b_path)
+
+        model_as[model_sequence] = {"checkpoints": model_a_checkpoints, 
+                                    "save_dir": os.path.join(a_model_save_dir, "accuracy", model_sequence)}
+        model_bs[model_sequence] = {"checkpoints": model_b_checkpoints, 
+                                    "save_dir": os.path.join(b_model_save_dir, "accuracy", model_sequence)}
+
+    return model_as, model_bs
+
+
+def calc_accuracies(models: dict[int, torch.nn.Module], dataloader: DataLoader, cache_path: str = None, 
+                    device: str = "cpu", pbar=None, use_cache: bool = False) -> dict[int, float]:
+    """Calculates the accuracy of a single model over the course of training on 1 dataloader."""
+
+    accuracies = {}
+    pbar = tqdm(total=len(models) * len(dataloader)) if pbar is None else pbar
+
+    # Load from cache if it exists and was calculated with at least as many samples as the current request.
+    if cache_path and os.path.exists(cache_path) and use_cache:
+        assert cache_path.endswith(".json"), "Cache path must be a JSON file."
+        with open(cache_path, "r") as f:
+            accuracy_dict = json.load(f)
+        if accuracy_dict["n_samples"] >= len(dataloader.dataset):
+            accuracies = {int(k): v for k, v in accuracy_dict["accuracies"].items() if int(k) in models}
+
+    for epoch, model in models.items():
+
+        # If we already have the accuracy, skip.
+        if epoch in accuracies:
+            pbar.update(len(dataloader))
             continue
 
-        sequence_path = os.path.join(model_save_dir, model_sequence)
+        # Otherwise, calculate the accuracy.
+        accuracies[epoch] = test_accuracy(dataloader, model, device=device, pbar=pbar)
 
-        # Load the model after training on the first dataset.
-        model_a_path = os.path.join(sequence_path, "model_a.pt")
-        init_cfg = config['schedules'][model_sequence]['initial_train']
-        model_base = config['schedules'][model_sequence]['model']
-        model_a = model_base    # load_model(model_base, init_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_a_path)
+    # Save to cache.
+    if cache_path:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w") as f:
+            json.dump({"n_samples": len(dataloader.dataset), "accuracies": accuracies}, f)
 
-        # Load the model after training on the second dataset.
-        model_b_path = os.path.join(sequence_path, "model_b.pt")
-        finetune_cfg = config['schedules'][model_sequence]['finetune']
-        model_b = model_base    # load_model(model_base, finetune_cfg['gabor_constrained'], n_channels=n_channels, save_path=model_b_path)
+    return accuracies
 
-        # Load models saved during training. Only load if specified to save loading time.
-        intermediate_a = {}
-        intermediate_b = {}
-        if intermediate:
-            for model_fname in os.listdir(os.path.join(sequence_path)):
-                # Has form model_{a or b}.pt or model_{a or b}_{epoch}.pt
-                _, a_or_b, *args = model_fname.split("_")
 
-                if args:    # If there is an epoch number.
-                    epoch = int(args[0].split(".")[0])
+def calc_accuracies_full(models: dict[str, dict[int, torch.nn.Module]],
+               train_loader: DataLoader, test_loader: DataLoader = None, 
+               use_cache: bool = True, device: str = 'cpu'
+               ) -> dict[str, tuple[dict[int, float], dict[int, float]]]:
+    """Calculates the accuracies over epochs on the train / test datasets for the multiple models.
+    
+    Args:
+        models: {model_name: {"checkpoints":{epoch: model}, "save_dir": save_dir}}
+        train_loader: The dataloader for the training dataset.
+        test_loader: The dataloader for the test dataset.
+        use_cache: Whether to use the cache or not.
+        device: The device to run the models on.
 
-                    # Load the model.
-                    intermediate_cfg = init_cfg if a_or_b == "a" else finetune_cfg
-                    intermediate_model = load_model(base_model, intermediate_cfg['gabor_constrained'], 
-                                                    n_channels=n_channels, 
-                                                    save_path=os.path.join(sequence_path, model_fname))
+    Returns:
+        {model_name: ({epoch: train_accuracy}, {epoch: test_accuracy}})
+    """
 
-                    if a_or_b == "a":
-                        intermediate_a[epoch] = [intermediate_model]
-                    else:
-                        intermediate_b[epoch] = [intermediate_model]
+    # Check input is well formed.
+    try:
+        _ = [model_info['checkpoints'] for model_info in models.values()]
+        _ = [model_info['save_dir'] for model_info in models.values()]
+    except KeyError:
+        raise ValueError("Models must be a dictionary of {model_name: {'checkpoints': {epoch: model}, 'save_dir': save_dir}}")
 
-        models[model_sequence] = (model_a, model_b, intermediate_a, intermediate_b)
+    # Determine the size of the progress bar.
+    n_checkpoints = sum([len(model_info['checkpoints']) for model_info in models.values()])
+    n_iters = n_checkpoints * (len(train_loader) + (len(test_loader) if test_loader else 0))
 
-    return models
+    model_accuracies = {}
+    with tqdm(total=n_iters, maxinterval=5) as pbar:
+            
+        # Calculate the accuracies for each model.
+        for model_name, model_info in models.items():
+
+            # Load the checkpoints.
+            checkpoints = model_info['checkpoints']
+            save_dir = model_info['save_dir']
+
+            # Calculate the accuracies.
+            train_accuracies = calc_accuracies(checkpoints, train_loader, cache_path=os.path.join(save_dir, "train_accuracies.json"), 
+                                            device=device, pbar=pbar, use_cache=use_cache)
+            test_accuracies = calc_accuracies(checkpoints, test_loader, cache_path=os.path.join(save_dir, "test_accuracies.json"), 
+                                            device=device, pbar=pbar, use_cache=use_cache) if test_loader else None
+
+            # Save the accuracies.
+            model_accuracies[model_name] = (train_accuracies, test_accuracies)
+
+    return model_accuracies
 
 
 def main():
@@ -422,14 +495,14 @@ def main():
 
     # Parse the configuration file + run the experiment.
     config = parse_config(args.config)
-    config['save_dir'] = os.path.join(config['save_dir'], 'repeat_1')   # TODO: handle multiple runs.
+    config['save_dir'] = os.path.join(config['save_dir'], '0')   # TODO: handle multiple runs.
 
     # Create the analysis folder.
     analysis_dir = os.path.join(config['save_dir'], "analysis")
     os.makedirs(analysis_dir, exist_ok=True)
 
     # Load the models.
-    models = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
+    models_a, models_b = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load the datasets.
@@ -440,30 +513,32 @@ def main():
 
     # Test the final accuracies of the models.
     if args.all or args.test:
-        print("Testing accuracies...")
-        accuracies = {}
-        for model_sequence, (model_a, model_b, _, _) in models.items():
-            model_a_acc = test_accuracy(testloader_a, model_a, device) if model_a is not None else None
-            accuracies[model_sequence] = (model_a_acc, 
-                                        test_accuracy(testloader_b, model_b, device),
-                                        test_accuracy(testloader_a, model_b, device))
+        print("Testing accuracies on dataset A...")
+        # TODO: make cache dataset specific.
+        accuracies_a = calc_accuracies_full(models_a, testloader_a, device=device, use_cache=False)
+
+        print("Testing accuracies on dataset B...")
+        accuracies_b = calc_accuracies_full(models_b, testloader_b, device=device, use_cache=False)
+
+        print("Testing accuracies on dataset A after finetuning on B...")
+        accuracies_ba = calc_accuracies_full(models_b, testloader_a, device=device, use_cache=False)
 
         # Print the results.
-        max_name_len = max([len(name) for name in accuracies])
+        max_name_len = max([len(name) for name in accuracies_a])
         padded_name = "Name" + ' ' * (max_name_len - 4)
         print(f"{padded_name}\tA\tB\tA (trained on B)")
-        for model_sequence, (acc_a, acc_b, acc_ba) in accuracies.items():
+        for model_sequence in accuracies_a:
+            acc_a = max(accuracies_a[model_sequence][0].items())[1]
+            acc_b = max(accuracies_b[model_sequence][0].items())[1]
+            acc_ba = max(accuracies_ba[model_sequence][0].items())[1]
             padded_name = model_sequence + ' ' * (max_name_len - len(model_sequence))
             print(f"{padded_name}\t{acc_a}\t{acc_b}\t{acc_ba}")
-
-        # Save the results.
-        with open(os.path.join(analysis_dir, "test_accuracies.pkl"), "wb") as f:
-            pickle.dump(accuracies, f)
 
     # Visualize the features of each model.
     if args.all or args.visualize:
         print("Visualizing features...")
-        for model_sequence, (model_a, model_b, _, _) in models.items():
+        for model_sequence, (model_as, model_bs) in models.items():
+            model_a, model_b = model_as[-1], model_bs[-1]
             # visualize_features(model_a, save_dir=analysis_dir)
             visualize_features(model_b, save_dir=analysis_dir)
 
@@ -472,14 +547,13 @@ def main():
         print("Running generalization analysis...")
 
         # Load the intermediate models on the finetuned dataset.
-        gabor_finetune_model_checkpoints = models['gabor'][3]
-        cnn_finetune_model_checkpoints = models['cnn'][3]
-        baseline_model_checkpoints = models['baseline'][3]
+        gabor_finetune_model_checkpoints = models['gabor'][1]
+        cnn_finetune_model_checkpoints = models['cnn'][1]
+        baseline_model_checkpoints = models['baseline'][1]
 
         test_generalization_hypothesis(gabor_finetune_model_checkpoints, cnn_finetune_model_checkpoints, 
                                        baseline_model_checkpoints, testloader_b, device, 
                                        save_dir=os.path.join(analysis_dir, 'generalization'))
-
     
     # Run the plasticity analysis.
     if args.all or args.plasticity:
