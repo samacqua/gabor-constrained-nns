@@ -54,7 +54,10 @@ def run_experiment(config: dict):
     dataset_cfg = config['datasets']
     dataset_a_train, _ = dataset_cfg['initial']
     dataset_b_train, _ = dataset_cfg['finetune']
+    # dataset_a_train = torch.utils.data.Subset(dataset_a_train, range(50))
+    # dataset_b_train = torch.utils.data.Subset(dataset_b_train, range(50))
 
+    # Load the models.
     model_names = list(config['schedules'])
     models = [config['schedules'][name]['model'] for name in model_names]
     model_infos = [{} for _ in model_names]
@@ -157,9 +160,9 @@ def main():
     # If repeating an experiment multiple times, then fix the directories.
     og_save_dir = config['save_dir']
     for i in range(config['n_repeats']):
-        config['save_dir'] = os.path.join(og_save_dir, f"repeat_{i+1}")
-        print(f"Running repeat {i+1} of {config['n_repeats']}")
-        run_experiment(config)
+        config['save_dir'] = os.path.join(og_save_dir, str(i))
+        print(f"Running repeat {i} of {config['n_repeats']}")
+        run_experiment(deepcopy(config))
 
 
 if __name__ == "__main__":
