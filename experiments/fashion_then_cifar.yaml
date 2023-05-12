@@ -1,0 +1,51 @@
+---
+name: fashion_then_fashion_linear
+description: Run on FashionMNIST then finetune on CIFAR-10.
+
+save_dir: out/fashion_then_fashion_linear
+seed: 1234
+n_repeats: 5
+
+base_model:
+  name: CNN
+  kernel_size: 8
+
+datasets:
+  initial: fashion_mnist
+  finetune: cifar10
+  params:
+    n_channels: 1
+    img_size: 32
+
+training:
+  initial:
+    epochs: 5
+  finetune:
+    epochs: 3
+
+  dataloader_params:
+    batch_size: 32
+
+schedules:
+
+  gabor:
+    initial_train:
+      gabor_constrained: true
+    finetune:
+      gabor_constrained: true
+      freeze_first_layer: true
+
+  cnn:
+    initial_train:
+      gabor_constrained: false
+    finetune:
+      gabor_constrained: false
+      freeze_first_layer: true
+
+  baseline:
+    initial_train:
+      gabor_constrained: false
+      freeze_first_layer: true
+    finetune:
+      gabor_constrained: false
+      freeze_first_layer: true
