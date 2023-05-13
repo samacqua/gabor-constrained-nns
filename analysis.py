@@ -17,6 +17,7 @@ import torch
 from torchvision import utils
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torchattacks import PGD, FGSM
 
 from parse_config import parse_config
 
@@ -153,39 +154,6 @@ def test_plasticity_hypothesis(models, test_loader_a,
     plt.show()
 
 
-def fgsm_attack(image, epsilon, data_grad):
-    # Collect the element-wise sign of the data gradient
-    sign_data_grad = data_grad.sign()
-    # Create the perturbed image by adjusting each pixel of the input image
-    perturbed_image = image + epsilon*sign_data_grad
-    # Adding clipping to maintain [-1,1] range
-    perturbed_image = torch.clamp(perturbed_image, -1, 1)
-    # Return the perturbed image
-    return perturbed_image
-
-  
-def adversarial_attack(model, x, y, device, epsilon=0.1):
-    """Returns the adversarial example that is perturbed by epsilon."""
-
-    x = x.clone().unsqueeze(0)
-    x.requires_grad = True
-
-    # Forward pass the data through the model + backpropogate the error.
-    output = model(x)
-    loss = torch.nn.CrossEntropyLoss()(output, y.unsqueeze(0))
-    model.zero_grad()
-    loss.backward()
-    data_grad = x.grad.data
-
-    # Call FGSM Attack
-    x_adv = fgsm_attack(x, epsilon, data_grad)
-
-    # Re-classify the perturbed image
-    output_adversarial = model(x_adv)
-
-    return x_adv, output, output_adversarial
-
-
 def test_adversarial_hypothesis(models, test_loader, device, save_dir, epsilon=0.1):
     """Tests the hypothesis: Gabor-constrained neural networks will be more robust to adversarial attacks.
 
@@ -197,81 +165,58 @@ def test_adversarial_hypothesis(models, test_loader, device, save_dir, epsilon=0
         device: The device to run the models on.
     """
 
-    # TODO: models across different runs.
-    models = models[0]
+    cnn_acc, gabor_acc, cnn_adv_acc, gabor_adv_acc = [], [], [], []
+    models_repeats = models
 
-    # Get the final models.
-    gabor_constrained_model = models["gabor"]["checkpoints"][max(models["gabor"]["checkpoints"].keys())]
-    unconstrained_model = models["cnn"]["checkpoints"][max(models["cnn"]["checkpoints"].keys())]
+    with tqdm(total=len(test_loader) * 6 * len(models), desc=f"With epsilon={epsilon}") as pbar:
+        for models in models_repeats:
 
-    # For each model, sample examples that it gets correct.
-    gabor_correct = []
-    unconstrained_correct = []
-    N_exs = 500
-    for model, list_of_correct in zip([gabor_constrained_model, unconstrained_model], [gabor_correct, unconstrained_correct]):
-        for x, y in test_loader:
-            x, y = x.to(device), y.to(device)
-            y_pred = model(x)
-            y_pred = torch.argmax(y_pred, dim=1)
-            for i in range(len(x)):
-                if y_pred[i] == y[i]:
-                    list_of_correct.append((x[i], y[i]))
-                    if len(list_of_correct) == N_exs:
-                        break
-            if len(list_of_correct) == N_exs:
-                break
+            # Get the CNN + Gabor model.
+            cnn_max_epoch = sorted(list(models["cnn"]["checkpoints"].keys()))[-1]
+            cnn_model = models["cnn"]["checkpoints"][cnn_max_epoch]
+            gabor_max_epoch = sorted(list(models["gabor"]["checkpoints"].keys()))[-1]
+            gabor_model = models["gabor"]["checkpoints"][gabor_max_epoch]
 
+            # Calculate the accuracy of each model on the test set.
+            cnn_acc.append(test_accuracy(test_loader=test_loader, model=cnn_model, device=device, pbar=pbar))
+            gabor_acc.append(test_accuracy(test_loader=test_loader, model=gabor_model, device=device, pbar=pbar))
 
-    if len(gabor_correct) < N_exs or len(unconstrained_correct) < N_exs:
-        raise ValueError("Not enough examples were sampled.")
+            # Set up the adversarial attack.
+            batch_size, n_channels, _, _ = next(iter(test_loader))[0].shape
+            cnn_atk = PGD(cnn_model, eps=epsilon, alpha=2/225, steps=10, random_start=True)
+            cnn_atk.set_normalization_used(mean=(0.5,) * n_channels, std=(0.5,) * n_channels)
+            gabor_atk = PGD(gabor_model, eps=epsilon, alpha=2/225, steps=10, random_start=True)
+            gabor_atk.set_normalization_used(mean=(0.5,) * n_channels, std=(0.5,) * n_channels)
 
-    # For each high-confidence instance, find the adversarial example that makes it classified as the wrong class.
-    gabor_adversaries = []
-    unconstrained_adversaries = []
-    for model, correct_data, adversaries in zip(
-        [gabor_constrained_model, unconstrained_model], 
-        [gabor_correct, unconstrained_correct], 
-        [gabor_adversaries, unconstrained_adversaries]):
+            # Make a dataset of the adversarial examples.
+            cnn_adv_examples = []
+            gabor_adv_examples = []
+            for data, target in test_loader:
+                data, target = data.to(device), target.to(device)
+                cnn_adv_examples.append(cnn_atk(data, target))
+                pbar.update(1)
+                gabor_adv_examples.append(gabor_atk(data, target))
+                pbar.update(1)
 
-        for x, y in tqdm(correct_data):
-            x_adv, og_output, adversarial_output = adversarial_attack(model, x, y, device, epsilon=epsilon)
+            # Make a dataloader of the adversarial examples.
+            cnn_adv_loader = torch.utils.data.DataLoader(
+                torch.utils.data.TensorDataset(torch.cat(cnn_adv_examples), torch.cat([target for _, target in test_loader])),
+                batch_size=batch_size)
+            gabor_adv_loader = torch.utils.data.DataLoader(
+                torch.utils.data.TensorDataset(torch.cat(gabor_adv_examples), torch.cat([target for _, target in test_loader])),
+                batch_size=batch_size)
             
-            # Normalize the outputs.
-            og_output = torch.nn.functional.softmax(og_output, dim=1)[0,y.item()]
-            adversarial_output = torch.nn.functional.softmax(adversarial_output, dim=1)[0,y.item()]
+            # Calculate the accuracy of each model on the adversarial examples.
+            cnn_adv_acc.append(test_accuracy(test_loader=cnn_adv_loader, model=cnn_model, device=device, pbar=pbar))
+            gabor_adv_acc.append(test_accuracy(test_loader=gabor_adv_loader, model=gabor_model, device=device, pbar=pbar))
 
-            adversaries.append((x, x_adv, y, og_output, adversarial_output))
-
-    # Calculate the difference in confidence between the original and adversarial examples.
-    gabor_distances = []
-    unconstrained_distances = []
-    gabor_img_diffs = []
-    unconstrained_img_diffs = []
-
-    for gabor_adv, unconstrained_adv in zip(gabor_adversaries, unconstrained_adversaries):
-
-        x, x_adv, y, og_output, adversarial_output = gabor_adv
-        gabor_distances.append(torch.abs(og_output - adversarial_output).item())
-        gabor_img_diffs.append(torch.norm(x - x_adv).item())
-
-        x, x_adv, y, og_output, adversarial_output = unconstrained_adv
-        unconstrained_distances.append(torch.abs(og_output - adversarial_output).item())
-        unconstrained_img_diffs.append(torch.norm(x - x_adv).item())
-
-    # Check if statistically significant.
-    # Between the distances.
-    t, p = stats.ttest_ind(gabor_distances, unconstrained_distances)
-    print(f"conf t: {t}, p: {p}")
-
-    # Between the image differences.
-    t, p = stats.ttest_ind(gabor_img_diffs, unconstrained_img_diffs)
-    print(f"img t: {t}, p: {p}")
-
-    # Print the result.
-    print(f"Gabor confidence difference: {np.mean(gabor_distances):.3f} {np.std(gabor_distances):.3f}")
-    print(f"Unconstrained confidence difference: {np.mean(unconstrained_distances):.3f} {np.std(unconstrained_distances):.3f}")
-    print(f"Gabor image difference: {np.mean(gabor_img_diffs):.3f} {np.std(gabor_img_diffs):.3f}")
-    print(f"Unconstrained image difference: {np.mean(unconstrained_img_diffs):.3f} {np.std(unconstrained_img_diffs):.3f}")
+    # Print the results.
+    cnn_acc_mean, cnn_acc_conf = np.mean(cnn_acc), 1.96 * np.std(cnn_acc) / np.sqrt(len(cnn_acc))
+    gabor_acc_mean, gabor_acc_conf = np.mean(gabor_acc), 1.96 * np.std(gabor_acc) / np.sqrt(len(gabor_acc))
+    cnn_adv_acc_mean, cnn_adv_acc_conf = np.mean(cnn_adv_acc), 1.96 * np.std(cnn_adv_acc) / np.sqrt(len(cnn_adv_acc))
+    gabor_adv_acc_mean, gabor_adv_acc_conf = np.mean(gabor_adv_acc), 1.96 * np.std(gabor_adv_acc) / np.sqrt(len(gabor_adv_acc))
+    print(f"Accuracy on test set: CNN: {cnn_acc_mean:.5f} ± {cnn_acc_conf:.5f}, Gabor: {gabor_acc_mean:.5f} ± {gabor_acc_conf:.5f}")
+    print(f"Accuracy on adversarial examples: CNN: {cnn_adv_acc_mean:.5f} ± {cnn_adv_acc_conf:.5f}, Gabor: {gabor_adv_acc_mean:.5f} ± {gabor_adv_acc_conf:.5f}")
 
 
 def visualize_tensor(tensor: torch.Tensor, ch: int = 0, allkernels: bool = False, nrow: int = 8, padding: int = 1, 
