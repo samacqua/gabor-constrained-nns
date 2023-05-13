@@ -137,6 +137,8 @@ class CNNSmall(GaborBase):
         super().__init__(is_gabornet=is_gabornet, gabor_type=gabor_type, n_channels=n_channels, kernel_size=kernel_size,
                         bias=bias, device=device, n_channels_out=N_CHANNELS_OUT)
 
+        self.c1 = nn.Conv2d(N_CHANNELS_OUT, N_CHANNELS_OUT*2, kernel_size=(3, 3), stride=1)
+        
         self.fc1 = nn.LazyLinear(64)
         self.fc2 = nn.Linear(64, n_classes)
 
