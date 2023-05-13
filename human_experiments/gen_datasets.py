@@ -105,7 +105,7 @@ def main():
         shutil.rmtree("human_experiments/data/")
 
     # Construct the adversarial examples dataset.
-    eps = 0.05
+    eps = 0.2
     for gabor_model, cnn_model, dataloader, name in (
         (gabor_model_a, cnn_model_a, dataloader_a, 'a'), 
         (gabor_model_b, cnn_model_b, dataloader_b, 'b')):
@@ -117,7 +117,7 @@ def main():
         cnn_atk.set_normalization_used(mean=(0.5,) * n_channels, std=(0.5,) * n_channels)
         gabor_atk.set_normalization_used(mean=(0.5,) * n_channels, std=(0.5,) * n_channels)
 
-        data, labels = next(iter(dataloader_b))
+        data, labels = next(iter(dataloader))
         data, labels = data.to(device), labels.to(device)
         
         cnn_adv = cnn_atk(data, labels)
