@@ -434,6 +434,7 @@ def main():
 
     parser.add_argument("--test", action="store_true", help="Calculate test accuracy of the models.")
     parser.add_argument("--visualize", action="store_true", help="Visualize the features of the models.")
+    parser.add_argument("--accuracy_a", action="store_true", help="Run analysis on the accuracy on dataset A.")
     parser.add_argument("--generalization", action="store_true", help="Run the generalization analysis.")
     parser.add_argument("--plasticity", action="store_true", help="Run the plasticity analysis.")
     parser.add_argument("--adversarial", action="store_true", help="Run the adversarial analysis.")
@@ -457,12 +458,13 @@ def main():
         os.makedirs(analysis_dir, exist_ok=True)
 
         # Load the models.
-        models_a, models_b = load_models(config, intermediate=args.all or args.generalization or args.plasticity)
+        models_a, models_b = load_models(config, intermediate=(
+            args.all or args.accuracy_a or args.generalization or args.plasticity))
         models_a_repeats.append(models_a)
         models_b_repeats.append(models_b)
 
     # Load the datasets.
-    if args.all or args.generalization or args.plasticity or args.test or args.adversarial:
+    if args.all or args.accuracy_a or args.generalization or args.plasticity or args.test or args.adversarial:
         print("Loading datasets...")
         testloader_a = torch.utils.data.DataLoader(config['datasets']['initial'][1], batch_size=128, shuffle=False)
         testloader_b = torch.utils.data.DataLoader(config['datasets']['finetune'][1], batch_size=128, shuffle=False)
@@ -523,6 +525,12 @@ def main():
             model_b = max(models_b[model_sequence]["checkpoints"].items())[1]   # Get the last model.
             b_save_dir = models_b[model_sequence]["save_dir"]
             visualize_features(model_b, save_dir=b_save_dir, title=model_sequence)
+
+    # Run the analysis of convergence on dataset A.
+    if args.all or args.accuracy_a:
+        print("Running accuracy analysis on dataset A...")
+        test_generalization_hypothesis(models_a_repeats, testloader_a, device, 
+                                       save_dir=os.path.join(analysis_dir, 'accuracy_a'), use_cache=use_cache)
 
     # Run the generalization analysis.
     if args.all or args.generalization:
