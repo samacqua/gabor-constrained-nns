@@ -61,7 +61,7 @@ def run_experiment(config: dict):
     model_names = list(config['schedules'])
     models = [config['schedules'][name]['model'] for name in model_names]
     model_infos = [{} for _ in model_names]
-    pre_train_weights = [deepcopy(model.get_conv_weights().detach().clone()) for model in models]
+    pre_train_weights = [deepcopy(model.get_conv_weights().detach().clone().to(device)) for model in models]
 
     # Unconstrain + freeze the models if necessary for finetuning.
     for name, model in zip(model_names, models):
