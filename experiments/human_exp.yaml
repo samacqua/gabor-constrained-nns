@@ -33,19 +33,11 @@ schedules:
       gabor_constrained: true
     finetune:
       gabor_constrained: true
-      freeze_first_layer: true
+      freeze_first_layer: false
 
   cnn:
     initial_train:
       gabor_constrained: false
     finetune:
       gabor_constrained: false
-      freeze_first_layer: true
-
-  baseline:
-    initial_train:
-      gabor_constrained: false
-      freeze_first_layer: true
-    finetune:
-      gabor_constrained: false
-      freeze_first_layer: true
+      freeze_first_layer: false
