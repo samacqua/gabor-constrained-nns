@@ -1,30 +1,31 @@
 ---
-name: fashion_then_fashion_linear
+name: fashion_then_cifar
 description: Run on FashionMNIST then finetune on CIFAR-10.
 
-save_dir: out/fashion_then_fashion_linear
+save_dir: out/fashion_then_cifar
 seed: 1234
 n_repeats: 5
 
 base_model:
-  name: CNN
+  name: CNNSmall
   kernel_size: 8
 
 datasets:
-  initial: fashion_mnist
+  initial: fashion-mnist
   finetune: cifar10
   params:
     n_channels: 1
     img_size: 32
+    dataset_dir: "./data/"
 
 training:
   initial:
-    epochs: 5
+    epochs: 10
   finetune:
-    epochs: 3
+    epochs: 5
 
   dataloader_params:
-    batch_size: 32
+    batch_size: 128
 
 schedules:
 

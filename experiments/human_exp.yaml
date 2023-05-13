@@ -12,10 +12,11 @@ base_model:
 
 datasets:
   initial: cifar10
-  finetune: fashion_mnist
+  finetune: fashion-mnist
   params:
     n_channels: 3
     img_size: 32
+    dataset_dir: "./data/"
 
 training:
   initial:

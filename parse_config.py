@@ -6,10 +6,8 @@ import yaml
 import os
 import sys
 
-import torchvision
-import torchvision.transforms as transforms
-
 from src.models import CNN, CNNSmall, CNNLinear
+from src.datasets import load_dataset
 
 
 def parse_config(config_path: str, config_updates: dict = None):
@@ -57,46 +55,12 @@ def load_datasets(dataset_cfg: dict) -> tuple[torch.utils.data.DataLoader, torch
 
     img_size = dataset_cfg['params']['img_size']
     n_channels = dataset_cfg['params']['n_channels']
-
-    # Make the transforms based on the number of channels.
-    # CIFAR-10 is 3-channel, Fashion-MNIST is 1-channel, so 1 has to change.
-    # If 3 channels, then just copying Fashion-MNIST across all channels.
-    # If 1 channel, then converting CIFAR-10 to grayscale.
-    cifar_transforms = ([torchvision.transforms.Grayscale(num_output_channels=1)] if n_channels == 1 else []) + [
-        torchvision.transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,) * n_channels, (0.5,) * n_channels)
-    ]
-    fashion_mnist_transforms = ([torchvision.transforms.Grayscale(num_output_channels=3)] if n_channels == 3 else []) + [
-        torchvision.transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,) * n_channels, (0.5,) * n_channels)
-    ]
-
-    # The transforms normalize each to a 3-channel 32x32 image.
-    datasets = {
-        "cifar10": {
-            "loader": torchvision.datasets.CIFAR10, 
-            "transform": transforms.Compose(cifar_transforms)
-        },
-        "fashion_mnist": {
-            "loader": torchvision.datasets.FashionMNIST, 
-            "transform": transforms.Compose(fashion_mnist_transforms)
-        },
-    }
+    dataset_dir = dataset_cfg['params'].get('dataset_dir', './data')
 
     # Load each dataset.
     loaded_datasets = []
     for dataset_name in (dataset_cfg['initial'], dataset_cfg['finetune']):
-        if dataset_name not in datasets:
-            raise ValueError(f"Dataset {dataset_name} not supported. Supported datasets: {list(datasets.keys())}")
-        
-        dataset = datasets[dataset_name]
-        trainset = dataset['loader'](root='./data', train=True,
-                                                download=True, transform=dataset['transform'])
-        testset = dataset['loader'](root='./data', train=False,
-                                            download=True, transform=dataset['transform'])
-        
+        trainset, testset, _ = load_dataset(dataset_name, img_size, n_channels, dataset_dir)        
         loaded_datasets.append((trainset, testset))
     
     return loaded_datasets
