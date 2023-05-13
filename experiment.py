@@ -70,6 +70,10 @@ def run_experiment(config: dict):
             model.freeze_first_layer()
         if not init_params['gabor_constrained']:
             model.unconstrain()
+        
+        # Set the device since we don't at init. (TODO: fix this).
+        model.to(device)
+        model.g1.device = device
 
     # Set up the models + data for initial training.
     optimizers_a = [torch.optim.Adam(
