@@ -161,12 +161,17 @@ def main():
     if args.overwrite:
         os.system(f"rm -rf {config['save_dir']}")
 
-    # If repeating an experiment multiple times, then fix the directories.
+    # Change the seed each repeat so that we get different random initializations + adjust the save directory.
     og_save_dir = config['save_dir']
+    og_seed = config['seed']
     for i in range(config['n_repeats']):
-        config['save_dir'] = os.path.join(og_save_dir, str(i))
+        repeat_seed = og_seed + i
+        repeat_save_dir = os.path.join(og_save_dir, str(i))
+
+        config = parse_config(args.config, {'seed': repeat_seed, 'save_dir': repeat_save_dir})
+
         print(f"Running repeat {i+1} of {config['n_repeats']}")
-        run_experiment(deepcopy(config))
+        run_experiment(config)
 
 
 if __name__ == "__main__":

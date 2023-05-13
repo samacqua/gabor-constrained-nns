@@ -12,11 +12,15 @@ import torchvision.transforms as transforms
 from src.models import CNN, CNNSmall, CNNLinear
 
 
-def parse_config(config_path: str):
+def parse_config(config_path: str, config_updates: dict = None):
     """Parses the configuration file."""
 
     with open(config_path, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
+
+    # Update the configuration.
+    if config_updates is not None:
+        config = {**config, **config_updates}
 
     # Set the random seed.
     torch.manual_seed(config['seed'])
