@@ -65,7 +65,7 @@ def run_experiment(config: dict):
 
     # Unconstrain + freeze the models if necessary for finetuning.
     for name, model in zip(model_names, models):
-        init_params = config['schedules'][name]['initial_train']
+        init_params = config['schedules'][name]['initial']
         if init_params['freeze_first_layer']:
             model.freeze_first_layer()
         if not init_params['gabor_constrained']:
@@ -77,7 +77,7 @@ def run_experiment(config: dict):
 
     # Set up the models + data for initial training.
     optimizers_a = [torch.optim.Adam(
-        model.parameters(), **config['schedules'][name]['initial_train']['optimizer_params']) 
+        model.parameters(), **config['schedules'][name]['initial']['optimizer_params']) 
         for name, model in zip(model_names, models)]
     dataloader_a = torch.utils.data.DataLoader(dataset_a_train, **training_cfg['dataloader_params'])
     save_dir_a = os.path.join(out_dir, 'dataset_a')
@@ -98,7 +98,7 @@ def run_experiment(config: dict):
     # Check that weights changed as expected.
     post_train_weights = [deepcopy(model.get_conv_weights().detach().clone()) for model in models]
     for post_train_weight, pre_train_weight, name in zip(post_train_weights, pre_train_weights, model_names):
-        if config['schedules'][name]['initial_train']['freeze_first_layer']:
+        if config['schedules'][name]['initial']['freeze_first_layer']:
             assert torch.allclose(post_train_weight, pre_train_weight), \
                 "Weights should not have changed after initial training."
         else:

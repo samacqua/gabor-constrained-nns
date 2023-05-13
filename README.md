@@ -25,7 +25,7 @@ process: the original training, and the finetuning stage.
 - `initial`
     - `gabor_constrained`: Whether or not the first layer should be constrained to be a Gabor function.
 - `finetune`
-    - `gabor_constrained`: Same as in `initial_train`.
+    - `gabor_constrained`: Same as in `initial`.
     - `freeze_first_layer`: Boolean to freeze the first layer during fine-tuning.
 
 ## TODO

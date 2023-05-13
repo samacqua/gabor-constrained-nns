@@ -304,7 +304,7 @@ def load_models(config: dict, intermediate: bool = False) -> tuple[dict[str, tor
         assert model_sequence in ['gabor', 'cnn', 'baseline'], "Model sequence not supported."
 
         # Load the models from dataset A.
-        init_cfg = config['schedules'][model_sequence]['initial_train']
+        init_cfg = config['schedules'][model_sequence]['initial']
         base_model = config['schedules'][model_sequence]['model']
         model_a_checkpoints = {}
         for i in range(0 if intermediate else a_epochs - 1, a_epochs):

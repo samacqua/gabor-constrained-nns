@@ -36,15 +36,15 @@ def parse_config(config_path: str, config_updates: dict = None):
 
     # Set the default sequence parameters.
     for schedule_name, training_schedule in config['schedules'].items():
-        stages = {"initial_train", "finetune"}
+        stages = {"initial", "finetune"}
         assert set(training_schedule.keys()) == stages, \
-            "Training schedule must have 'initial_train' and 'finetune' keys."
+            "Training schedule must have 'initial' and 'finetune' keys."
 
         for stage in stages:
             training_schedule[stage] = {**default_schedule_params, **training_schedule[stage]}
 
         training_schedule['model'] = load_model(config['base_model'], 
-                                                training_schedule['initial_train']['gabor_constrained'], 
+                                                training_schedule['initial']['gabor_constrained'], 
                                                 n_channels=config['datasets']['params']['n_channels'])
 
     return config

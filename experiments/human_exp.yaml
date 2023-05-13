@@ -30,14 +30,14 @@ training:
 schedules:
 
   gabor:
-    initial_train:
+    initial:
       gabor_constrained: true
     finetune:
       gabor_constrained: true
       freeze_first_layer: false
 
   cnn:
-    initial_train:
+    initial:
       gabor_constrained: false
     finetune:
       gabor_constrained: false
