@@ -1,0 +1,51 @@
+---
+name: human_exp
+description: Experiment to generate the final models for the human experiments.
+
+save_dir: out/human_exp
+seed: 1234
+n_repeats: 1  # Because only making data.
+
+base_model:
+  name: CNNSmall  
+  kernel_size: 8
+
+datasets:
+  initial: cifar10
+  finetune: fashion_mnist
+  params:
+    n_channels: 3
+    img_size: 32
+
+training:
+  initial:
+    epochs: 10
+  finetune:
+    epochs: 10
+
+  dataloader_params:
+    batch_size: 128
+
+schedules:
+
+  gabor:
+    initial_train:
+      gabor_constrained: true
+    finetune:
+      gabor_constrained: true
+      freeze_first_layer: true
+
+  cnn:
+    initial_train:
+      gabor_constrained: false
+    finetune:
+      gabor_constrained: false
+      freeze_first_layer: true
+
+  baseline:
+    initial_train:
+      gabor_constrained: false
+      freeze_first_layer: true
+    finetune:
+      gabor_constrained: false
+      freeze_first_layer: true
