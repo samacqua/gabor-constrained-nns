@@ -1,5 +1,10 @@
 # Do Gabor filter-constrained neural networks generalize better?
 
+## Overview / Abstract
+
+It is well known that humans have incredibly flexible and general object recognition capabilities, especially in comparison to machine vision systems. In an attempt to learn more about what might be causing this disparity in performance and to improve machine vision systems, we explore whether constraining a machine vision system to be more human-like improves the performance of the system in learning new tasks. Specifically, Gabor filters have been used to model simple cells in the visual cortex of mammals , and previous work has shown that constraining the first layer of a convolutional neural network (CNN) to parameterize the Gabor function can lead to faster learning and higher performance.
+
+We extend this work by testing if these Gabor-constrained models (GaborNets) *generalize* better to new datasets. We also run human experiments using adversarial examples from both datasets in order to analyze the disparity in performance between humans and both networks on these adversaries.  Our experiments show that, while the GaborNet does learn more robust representations, it does not learn faster or converge to a higher accuracy. Additionally, our replication of prior work shows that previous results demonstrating performance improvements are limited to very specific models and datasets. Our human experiments validate these experimental results, showing that people's performance is not more similar to GaborNets than CNNs. These null results imply that even though something might model the human brain well, it will not necessarily improve performance of machine learning methods.
 
 ## Basic Usage
 
