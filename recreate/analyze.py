@@ -215,8 +215,9 @@ def main():
     # Load the testset.
     print("Loading dataset...")
     torch.manual_seed(args.seed)
-    train_set, test_set, n_classes = load_dataset(args.dataset, args.dataset_dir or train_args['dataset_dir'], 
-                                       img_size=(train_args['img_size'], train_args['img_size']), n_channels=train_args['n_channels'])
+    train_set, test_set, n_classes = load_dataset(
+        args.dataset, dataset_dir=(args.dataset_dir or train_args['dataset_dir']), 
+        img_size=(train_args['img_size'], train_args['img_size']), n_channels=train_args['n_channels'])
 
     # Split the trainset into train and test.
     train_set, test_set1 = torch.utils.data.random_split(
