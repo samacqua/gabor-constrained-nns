@@ -1,5 +1,9 @@
 # Recreate previous results
 
-`python -m recreate.dogs_cats --no_padding` will train the model with the exact architecture to recreate previous results.
-
-Run `python -m recreate.dogs_cats --help` to see command-line arguments to run variations on the experiment.
+This directory contains code to recreate prior results. Visit the [notebook](https://colab.research.google.com/drive/19arSJlLq4TDxKNFte09uX5uI6IH3Yt0m?usp=sharing) to see different variants on running original results, including 
+- different gabornet implementations
+- different kernel sizes
+- different datasets
+- different dataset pre-processings (image size, color space)
+- different model sizes
+- first-layer-frozen variants

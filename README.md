@@ -24,26 +24,7 @@ The YAML also specifies *schedules*. A schedule specifies the architecture and t
 process: the original training, and the finetuning stage.
 - `initial`
     - `gabor_constrained`: Whether or not the first layer should be constrained to be a Gabor function.
+    - `freeze_first_layer`: Boolean to freeze the first layer during the initial training.
 - `finetune`
     - `gabor_constrained`: Same as in `initial`.
     - `freeze_first_layer`: Boolean to freeze the first layer during fine-tuning.
-
-## TODO
-
-### Recreating previous results
-- [x] get working with cuda
-- [x] fix gabornet implementations
-- [ ] test each gabornet implementation
-- [x] fix reproducibility issue
-	- it was a dropout issue
-- [ ] run all conditions (5x5, 15x15, learning v. frozen, CNN init w/ gabor + compare
-- [x] write code to recreate figure in paper
-- [x] write code to compare an arbitrary number of runs
-- [ ] run with simpler architecture on both Cats v. Dogs, but also CIFAR-10 and Fashion-MNIST
-
-### Experiments
-- [ ] update experiment YAMLs
-- [ ] implement better adversarial example creator
-- [ ] make adversarial examples for reece
-- [ ] run all experiments
-- [ ] run analyses
