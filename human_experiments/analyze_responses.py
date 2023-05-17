@@ -9,6 +9,13 @@ fashion_mnist_key = ['4', '6', '9', '3', '1', '2', '3', '0', '5', '1']
 
 correct_proportions = []
 
+def mean_confidence_interval(data, confidence=0.95):
+    a = 1.0 * np.array(data)
+    n = len(a)
+    m, se = np.mean(a), scipy.stats.sem(a)
+    h = se * scipy.stats.t.ppf((1 + confidence) / 2., n-1)
+    return m, m-h, m+h
+
 def same(answers, answer_key):
     correct = []
     for answer, key in zip(answers, answer_key):
@@ -59,10 +66,16 @@ total_gabor_population = (cifar_gabor_population + fashion_gabor_population)/2
 assert len(total_gabor_population) == len(os.listdir(directory))
 
 print(f'------RESULTS:------')
-print(f'\nmean cifar adversary performance based on cnn:{np.mean(cifar_cnn_population)}')
-print(f'\nmean fashion mnist adversary performance based on cnn:{np.mean(fashion_cnn_population)}')
-print(f'\nmean cifar adversary performance based on Gabornet:{np.mean(cifar_gabor_population)}')
-print(f'\nmean fashion mnist adversary performance based on Gabornet:{np.mean(fashion_gabor_population)}')
+
+mean, lower, upper = mean_confidence_interval(cifar_cnn_population)
+print(f'\nmean cifar adversary performance based on cnn:{np.mean(mean)} +/- {upper-mean}')
+mean, lower, upper = mean_confidence_interval(fashion_cnn_population)
+print(f'\nmean fashion mnist adversary performance based on cnn:{np.mean(mean)} +/- {upper-mean}')
+
+mean, lower, upper = mean_confidence_interval(cifar_gabor_population)
+print(f'\nmean cifar adversary performance based on Gabornet:{np.mean(mean)} +/- {upper-mean}')
+mean, lower, upper = mean_confidence_interval(fashion_gabor_population)
+print(f'\nmean fashion mnist adversary performance based on Gabornet:{np.mean(mean)} +/- {upper-mean}')
 
 # student t test:
 all_out = scipy.stats.ttest_ind(total_cnn_population, total_gabor_population, equal_var=True)
@@ -73,13 +86,3 @@ print(f'\nusing only cifar, we get a p-value of {cifar_only_out.pvalue} and a st
 
 fashion_only_out = scipy.stats.ttest_ind(fashion_cnn_population, fashion_gabor_population, equal_var=True)
 print(f'\nusing only fashion, we get a p-value of {fashion_only_out.pvalue} and a statistic of {fashion_only_out.statistic}')
-
-
-# student t-test of cnn vs gabor adversaries? of just 1 dataset?
-
-
-
-
-
-
-
