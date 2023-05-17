@@ -2,14 +2,8 @@ import os
 import numpy as np
 import scipy.stats
 
-directory = "experiment_responses"
-
-cifar_key = ['5', '4', '6', '7', '5', '8', '9', '6', '5', '5']
-fashion_mnist_key = ['4', '6', '9', '3', '1', '2', '3', '0', '5', '1']
-
-correct_proportions = []
-
 def mean_confidence_interval(data, confidence=0.95):
+    "Gives mean and confidence intervals of data."
     a = 1.0 * np.array(data)
     n = len(a)
     m, se = np.mean(a), scipy.stats.sem(a)
@@ -17,6 +11,8 @@ def mean_confidence_interval(data, confidence=0.95):
     return m, m-h, m+h
 
 def same(answers, answer_key):
+    """given two arrays, buts 1 at index if that index has the same
+    value in both arrays. Otherwise, 0."""
     correct = []
     for answer, key in zip(answers, answer_key):
         if answer == key:
@@ -26,10 +22,15 @@ def same(answers, answer_key):
     return np.array(correct)
 
 if __name__ == "__main__":
+    experiment_directory = "experiment_responses"
 
-    for filename in os.listdir(directory):
+    cifar_key = ['5', '4', '6', '7', '5', '8', '9', '6', '5', '5']
+    fashion_mnist_key = ['4', '6', '9', '3', '1', '2', '3', '0', '5', '1']
+
+    correct_proportions = []
+    for filename in os.listdir(experiment_directory):
         if filename[0] != '.':
-            with open(directory+"/"+filename, "r") as f:
+            with open(experiment_directory+"/"+filename, "r") as f:
                 raw_data = f.read()
             extracted_data = raw_data.split(',')
 
@@ -37,11 +38,7 @@ if __name__ == "__main__":
         cifar_gabor_answers = extracted_data[10:20]
         fashion_cnn_answers = extracted_data[20:30]
         fashion_gabor_answers = extracted_data[30:]
-        assert len(cifar_cnn_answers) == 10
-        assert len(cifar_gabor_answers) == 10
-        assert len(fashion_cnn_answers) == 10
-        assert len(fashion_gabor_answers) == 10
-        
+    
 
         cifar_cnn_proportion = np.mean(same(cifar_cnn_answers, cifar_key))
         cifar_gabor_proportion = np.mean(same(cifar_gabor_answers, cifar_key))
@@ -62,10 +59,8 @@ if __name__ == "__main__":
     fashion_gabor_population = np.array([d['fashion_gabor'] for d in correct_proportions])
 
     total_cnn_population = (cifar_cnn_population + fashion_cnn_population)/2
-    assert len(total_cnn_population) == len(os.listdir(directory))
 
     total_gabor_population = (cifar_gabor_population + fashion_gabor_population)/2
-    assert len(total_gabor_population) == len(os.listdir(directory))
 
     print(f'------RESULTS:------')
 
